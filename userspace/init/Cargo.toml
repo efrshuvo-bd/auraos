@@ -1,0 +1,17 @@
+[package]
+name = "aura-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AuraOS init (PID 1) — starts Agent Core then shell"
+
+[[bin]]
+name = "aura-init"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }

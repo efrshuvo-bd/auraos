@@ -1,0 +1,19 @@
+[package]
+name = "aura-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AuraOS monolithic teaching kernel for QEMU aarch64 virt"
+
+[[bin]]
+name = "aura-kernel"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

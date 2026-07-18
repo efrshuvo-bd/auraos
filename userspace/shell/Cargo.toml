@@ -1,0 +1,18 @@
+[package]
+name = "aura-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AuraOS shell — home screen + always-on agent UI"
+
+[[bin]]
+name = "aura-shell"
+path = "src/main.rs"
+
+[dependencies]
+shared = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

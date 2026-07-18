@@ -1,0 +1,10 @@
+[package]
+name = "aura-kboot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Host-side AuraOS kernel boot transcript simulator (when aarch64 link is blocked)"
+
+[[bin]]
+name = "aura-kboot"
+path = "src/main.rs"

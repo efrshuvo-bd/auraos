@@ -1,0 +1,18 @@
+{
+  "scheme": "A/B",
+  "active": "A",
+  "slots": {
+    "A": {
+      "version": "0.1.0",
+      "bootable": true,
+      "successful_boot": true
+    },
+    "B": {
+      "version": null,
+      "bootable": false,
+      "successful_boot": false
+    }
+  },
+  "rollback_on_failure": true,
+  "verified_boot": "dev-keys"
+}

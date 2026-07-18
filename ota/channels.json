@@ -1,0 +1,29 @@
+{
+  "os": "AuraOS",
+  "channels": [
+    {
+      "name": "os",
+      "description": "Kernel, drivers, shell",
+      "current": "0.1.0",
+      "signed": true
+    },
+    {
+      "name": "agent",
+      "description": "Agent Core binary + tool schemas",
+      "current": "0.1.0",
+      "signed": true
+    },
+    {
+      "name": "models",
+      "description": "Optional on-device model packs (Tier B)",
+      "current": null,
+      "signed": true
+    }
+  ],
+  "support_years": 4,
+  "cadence": {
+    "security": "monthly",
+    "agent": "monthly",
+    "os_feature": "quarterly"
+  }
+}

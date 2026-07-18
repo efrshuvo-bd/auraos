@@ -1,0 +1,8 @@
+# Default linker for aarch64-unknown-none.
+# On Windows, if WDAC blocks rust-lld (os error 4551), run: .\scripts\fix-linker.ps1
+
+[target.aarch64-unknown-none]
+linker = "rust-lld"
+rustflags = [
+  "-C", "link-arg=-Taarch64-qemu.ld",
+]
