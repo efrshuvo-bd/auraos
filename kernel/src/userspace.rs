@@ -1,10 +1,8 @@
 ﻿//! Spawn embedded guest ELFs into real EL0 processes.
 
 use crate::console;
+use crate::guest_blobs::{GUEST_AGENT, GUEST_INIT, GUEST_SHELL};
 use crate::process;
-
-// Built by kernel/build.rs into OUT_DIR.
-include!(concat!(env!("OUT_DIR"), "/guest_blobs.rs"));
 
 pub fn spawn_init() {
     console::println("userspace: loading embedded guest ELFs");
