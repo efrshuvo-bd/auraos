@@ -1,7 +1,10 @@
-//! VirtIO-MMIO console (device id 3) — TX path for guest SYS_WRITE.
+//! VirtIO-MMIO console (device id 3) — TX + polled RX for guest I/O.
 //!
 //! Early kernel console stays on PL011 UART. After `init()`, guest writes prefer
 //! VirtIO console TX when a console device was negotiated.
+//!
+//! RX is **polled** (`read_bytes` / `poll`): the used ring is drained on demand.
+//! Full VirtIO IRQ → GIC delivery is deferred; `ack_irq` only clears MMIO status.
 
 use core::sync::atomic::{AtomicBool, Ordering, fence};
 
@@ -64,12 +67,17 @@ struct ConsoleDev {
     base: usize,
     _version: u32,
     tx_buf: usize,
-    _rx_buf: usize,
+    rx_buf: usize,
     tx_q: QueuePages,
-    _rx_q: QueuePages,
+    rx_q: QueuePages,
     tx_avail_idx: u16,
     tx_used_idx: u16,
+    rx_avail_idx: u16,
+    rx_used_idx: u16,
 }
+
+/// Bytes per RX descriptor slice inside the shared RX page.
+const RX_CHUNK: usize = frame::PAGE_SIZE / QUEUE_SIZE;
 
 static mut DEV: Option<ConsoleDev> = None;
 
@@ -99,6 +107,7 @@ struct VirtqAvail {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct VirtqUsedElem {
     id: u32,
     len: u32,
@@ -136,7 +145,15 @@ pub fn init() {
     }
 
     READY.store(true, Ordering::SeqCst);
-    console::println("virtio: console TX ready");
+    console::println("virtio: console TX/RX ready (RX polled; IRQ deferred)");
+    // Smoke-poll once so RX used-ring drain / reseed is exercised at boot.
+    let mut scratch = [0u8; 16];
+    let n = read_bytes(&mut scratch).unwrap_or(0);
+    if n == 0 {
+        console::println("virtio: RX poll ok (empty)");
+    } else {
+        console::println("virtio: RX poll ok (bytes pending)");
+    }
 }
 
 pub fn is_ready() -> bool {
@@ -166,6 +183,27 @@ pub fn write_bytes(bytes: &[u8]) -> bool {
         offset += chunk;
     }
     true
+}
+
+/// Non-blocking polled read from VirtIO console RX.
+/// Returns `None` if VirtIO is unavailable; `Some(n)` bytes copied (may be 0).
+pub fn read_bytes(out: &mut [u8]) -> Option<usize> {
+    if !is_ready() {
+        return None;
+    }
+    let dev = unsafe {
+        match DEV.as_mut() {
+            Some(d) => d,
+            None => return None,
+        }
+    };
+    Some(unsafe { drain_rx(dev, out) })
+}
+
+/// Drain any pending RX used buffers (drop payload). Call from idle paths.
+pub fn poll() {
+    let mut scratch = [0u8; RX_CHUNK];
+    let _ = read_bytes(&mut scratch);
 }
 
 fn find_console() -> Option<usize> {
@@ -223,8 +261,7 @@ fn setup_device(base: usize, version: u32) -> Result<(), ()> {
         setup_queue(base, version, Q_RX, &rx_q)?;
         setup_queue(base, version, Q_TX, &tx_q)?;
 
-        // Seed RX with a device-writable buffer (ignored for now).
-        seed_rx(base, &rx_q, rx_buf);
+        let rx_avail_idx = seed_rx(base, &rx_q, rx_buf);
 
         let mut st = STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_DRIVER_OK;
         if version >= 2 {
@@ -236,11 +273,13 @@ fn setup_device(base: usize, version: u32) -> Result<(), ()> {
             base,
             _version: version,
             tx_buf,
-            _rx_buf: rx_buf,
+            rx_buf,
             tx_q,
-            _rx_q: rx_q,
+            rx_q,
             tx_avail_idx: 0,
             tx_used_idx: 0,
+            rx_avail_idx,
+            rx_used_idx: 0,
         });
     }
     Ok(())
@@ -352,20 +391,75 @@ unsafe fn write_u64(base: usize, low: usize, high: usize, val: u64) {
     w32(base, high, (val >> 32) as u32);
 }
 
-unsafe fn seed_rx(base: usize, q: &QueuePages, rx_buf: usize) {
-    let desc = q.desc as *mut VirtqDesc;
-    (*desc).addr = rx_buf as u64;
-    (*desc).len = frame::PAGE_SIZE as u32;
-    (*desc).flags = VIRTQ_DESC_F_WRITE;
-    (*desc).next = 0;
-
+/// Post `QUEUE_SIZE` device-writable RX descriptors (slices of `rx_buf`).
+/// Returns the avail ring index after seeding.
+unsafe fn seed_rx(base: usize, q: &QueuePages, rx_buf: usize) -> u16 {
+    let desc_base = q.desc as *mut VirtqDesc;
     let avail = q.avail as *mut VirtqAvail;
-    (*avail).ring[0] = 0;
+    for i in 0..QUEUE_SIZE {
+        let desc = desc_base.add(i);
+        (*desc).addr = (rx_buf + i * RX_CHUNK) as u64;
+        (*desc).len = RX_CHUNK as u32;
+        (*desc).flags = VIRTQ_DESC_F_WRITE;
+        (*desc).next = 0;
+        (*avail).ring[i] = i as u16;
+    }
     fence(Ordering::SeqCst);
-    (*avail).idx = 1;
+    (*avail).idx = QUEUE_SIZE as u16;
     fence(Ordering::SeqCst);
     w32(base, REG_QUEUE_SEL, Q_RX);
     w32(base, REG_QUEUE_NOTIFY, Q_RX);
+    QUEUE_SIZE as u16
+}
+
+/// Drain completed RX descriptors into `out`; re-post each buffer to the avail ring.
+unsafe fn drain_rx(dev: &mut ConsoleDev, out: &mut [u8]) -> usize {
+    let used = dev.rx_q.used as *const VirtqUsed;
+    let mut copied = 0usize;
+    let mut reposted = false;
+    loop {
+        fence(Ordering::SeqCst);
+        let idx = (*used).idx;
+        if idx == dev.rx_used_idx {
+            break;
+        }
+        let slot = (dev.rx_used_idx as usize) % QUEUE_SIZE;
+        let elem = (*used).ring[slot];
+        let desc_id = elem.id as usize % QUEUE_SIZE;
+        let n = core::cmp::min(elem.len as usize, RX_CHUNK);
+        let src = (dev.rx_buf + desc_id * RX_CHUNK) as *const u8;
+        let take = core::cmp::min(n, out.len().saturating_sub(copied));
+        if take > 0 {
+            core::ptr::copy_nonoverlapping(src, out.as_mut_ptr().add(copied), take);
+            copied += take;
+        }
+        // Re-post this descriptor for the device.
+        let desc = (dev.rx_q.desc as *mut VirtqDesc).add(desc_id);
+        (*desc).addr = (dev.rx_buf + desc_id * RX_CHUNK) as u64;
+        (*desc).len = RX_CHUNK as u32;
+        (*desc).flags = VIRTQ_DESC_F_WRITE;
+        (*desc).next = 0;
+
+        let avail = dev.rx_q.avail as *mut VirtqAvail;
+        let a_slot = (dev.rx_avail_idx as usize) % QUEUE_SIZE;
+        (*avail).ring[a_slot] = desc_id as u16;
+        fence(Ordering::SeqCst);
+        dev.rx_avail_idx = dev.rx_avail_idx.wrapping_add(1);
+        (*avail).idx = dev.rx_avail_idx;
+        fence(Ordering::SeqCst);
+        reposted = true;
+
+        dev.rx_used_idx = dev.rx_used_idx.wrapping_add(1);
+        if copied == out.len() && out.len() > 0 {
+            break;
+        }
+    }
+    if reposted {
+        w32(dev.base, REG_QUEUE_SEL, Q_RX);
+        w32(dev.base, REG_QUEUE_NOTIFY, Q_RX);
+        ack_irq(dev.base);
+    }
+    copied
 }
 
 fn tx_chunk(dev: &mut ConsoleDev, bytes: &[u8]) -> bool {

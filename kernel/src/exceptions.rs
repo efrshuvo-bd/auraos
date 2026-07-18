@@ -187,6 +187,17 @@ extern "C" fn el0_sync_rust(sp: *mut u64) -> u64 {
         }
     } else {
         console::println("exception: unexpected EL0 sync");
+        console::print("  esr=");
+        print_hex(esr);
+        console::print(" elr=");
+        print_hex(tf.elr_el1);
+        let far: u64;
+        unsafe {
+            asm!("mrs {0}, far_el1", out(reg) far, options(nostack));
+        }
+        console::print(" far=");
+        print_hex(far);
+        console::println("");
         TrapAction::Exit
     };
 

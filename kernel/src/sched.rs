@@ -4,6 +4,7 @@ use crate::console;
 use crate::process;
 use crate::timer;
 use crate::trap::TrapAction;
+use crate::virtio;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_IDX: AtomicUsize = AtomicUsize::new(0);
@@ -46,6 +47,8 @@ pub fn run() -> ! {
         if !ran_any {
             console::println("sched: idle");
             loop {
+                // Polled VirtIO RX drain (IRQ path deferred).
+                virtio::poll();
                 crate::arch::wait_for_interrupt();
             }
         }

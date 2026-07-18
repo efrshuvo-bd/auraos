@@ -4,6 +4,7 @@
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
+# Guest SYS_READ                   → VirtIO console RX (polled; empty unless typed)
 
 AuraOS kernel online
 phase1: uart + panic + frame allocator
@@ -12,9 +13,10 @@ vm: EL1 identity map installed (MMU on)
 phase2: identity map installed
 exception: VBAR_EL1 installed (SVC ready)
 virtio: console at mmio version=2 (modern)
-virtio: console TX ready
+virtio: console TX/RX ready (RX polled; IRQ deferred)
+virtio: RX poll ok (empty)
 phase2: timer tick armed
-syscall: table ready (write/yield/exit/ipc)
+syscall: table ready (write/read/yield/exit/ipc)
 phase2: scheduler + syscalls + ipc ready
 userspace: loading embedded guest ELFs
 userspace: init/agent/shell ready (EL0)

@@ -7,6 +7,7 @@ pub const SYS_YIELD: u64 = 2;
 pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
+pub const SYS_READ: u64 = 6;
 
 #[inline(always)]
 pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64 {
@@ -35,6 +36,16 @@ pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64 {
 pub fn write(s: &str) {
     unsafe {
         let _ = syscall3(SYS_WRITE, s.as_ptr() as u64, s.len() as u64, 0);
+    }
+}
+
+/// Non-blocking console read via VirtIO RX. Returns bytes copied (0 if empty).
+pub fn read(buf: &mut [u8]) -> usize {
+    let n = unsafe { syscall3(SYS_READ, buf.as_mut_ptr() as u64, buf.len() as u64, 0) };
+    if n < 0 {
+        0
+    } else {
+        n as usize
     }
 }
 
