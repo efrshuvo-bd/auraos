@@ -12,6 +12,8 @@ mod console;
 mod elf;
 mod exceptions;
 mod frame;
+mod gic;
+mod guest_blobs;
 mod ipc;
 mod mem;
 mod process;
@@ -43,7 +45,7 @@ pub extern "C" fn kernel_main() -> ! {
     exceptions::init();
     virtio::init();
     timer::init();
-    console::println("phase2: timer tick armed");
+    console::println("phase2: gic + timer IRQ armed");
 
     process::init();
     sched::init();
