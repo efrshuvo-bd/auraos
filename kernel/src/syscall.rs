@@ -3,6 +3,9 @@
 use crate::console;
 use crate::ipc;
 use crate::sched;
+use crate::trap::TrapFrame;
+use crate::uart;
+use crate::virtio;
 
 pub const SYS_WRITE: u64 = 1;
 pub const SYS_YIELD: u64 = 2;
@@ -10,19 +13,18 @@ pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
 
+const USER_VA_MAX: u64 = 0x0000_0000_0080_0000;
+
 pub fn init() {
     console::println("syscall: table ready (write/yield/exit/ipc)");
 }
 
-/// Kernel-side syscall entry used by simulated userspace tasks.
-pub fn dispatch(num: u64, a0: u64, a1: u64, _a2: u64) -> i64 {
+/// Trap-based syscall entry (x8=nr, args in x0..).
+pub fn dispatch_trap(num: u64, tf: &mut TrapFrame) -> i64 {
+    let a0 = tf.x[0];
+    let a1 = tf.x[1];
     match num {
-        SYS_WRITE => {
-            // a0 = ptr, a1 = len — for simulated userspace we accept a static message id
-            let _ = (a0, a1);
-            console::println("syscall: write");
-            0
-        }
+        SYS_WRITE => sys_write(a0, a1),
         SYS_YIELD => {
             sched::yield_now();
             0
@@ -32,8 +34,7 @@ pub fn dispatch(num: u64, a0: u64, a1: u64, _a2: u64) -> i64 {
             0
         }
         SYS_IPC_SEND => {
-            let ok = ipc::send(a0 as u32, a1);
-            if ok {
+            if ipc::send(a0 as u32, a1) {
                 0
             } else {
                 -1
@@ -45,4 +46,19 @@ pub fn dispatch(num: u64, a0: u64, a1: u64, _a2: u64) -> i64 {
             -1
         }
     }
+}
+
+fn sys_write(ptr: u64, len: u64) -> i64 {
+    if len == 0 {
+        return 0;
+    }
+    if len > 4096 || ptr == 0 || ptr.saturating_add(len) > USER_VA_MAX {
+        return -1;
+    }
+    let slice = unsafe { core::slice::from_raw_parts(ptr as *const u8, len as usize) };
+    // Prefer VirtIO console TX; fall back to UART if VirtIO is absent/failed.
+    if !virtio::write_bytes(slice) {
+        uart::write_bytes(slice);
+    }
+    len as i64
 }

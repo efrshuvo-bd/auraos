@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 
 static FRAME_BASE: AtomicUsize = AtomicUsize::new(0);
 static FRAME_END: AtomicUsize = AtomicUsize::new(0);
@@ -30,8 +30,15 @@ pub fn alloc_frame() -> Option<usize> {
             .is_ok()
         {
             FRAMES_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+            zero_page(cur);
             return Some(cur);
         }
+    }
+}
+
+pub fn zero_page(phys: usize) {
+    unsafe {
+        core::ptr::write_bytes(phys as *mut u8, 0, PAGE_SIZE);
     }
 }
 

@@ -1,26 +1,38 @@
 # Documented serial transcript for AuraOS kernel bring-up on QEMU virt.
-# When `scripts/run-qemu.ps1` works, you should see the same lines.
+# `scripts/run-qemu.ps1` muxes PL011 UART + VirtIO console onto stdio, so you
+# see both streams in one terminal (order may interleave slightly).
+#
+# Kernel early boot / sched lines → UART
+# Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
 
 AuraOS kernel online
 phase1: uart + panic + frame allocator
 phase2: heap + frame allocator ready
-vm: identity map assumed (QEMU early boot)
-phase2: identity map installed (stub)
+vm: EL1 identity map installed (MMU on)
+phase2: identity map installed
+exception: VBAR_EL1 installed (SVC ready)
+virtio: console at mmio version=2 (modern)
+virtio: console TX ready
 phase2: timer tick armed
 syscall: table ready (write/yield/exit/ipc)
 phase2: scheduler + syscalls + ipc ready
+userspace: loading embedded guest ELFs
+userspace: init/agent/shell ready (EL0)
 phase2/3: userspace init scheduled
 AuraOS entering scheduler
 sched: run init
 init: AuraOS PID 1 online
 init: starting Agent Core (required)
 init: starting shell
+syscall: exit
 sched: run agent.core
 agent.core: privileged service online
 agent.core: tools ready (system_status/echo/list_services/help)
+syscall: exit
 sched: run shell
 shell: home + agent overlay ready
 shell: agent handshake ok (IPC)
 syscall: write
 shell: demo complete — ask agent on host via `cargo run -p aura-shell`
+syscall: exit
 sched: idle

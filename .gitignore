@@ -23,3 +23,4 @@ tools/qemu-serial.log
 tools/qemu-stderr.log
 tools/install-scoop.ps1
 tools/lld.exe
+userspace/guest/target/
