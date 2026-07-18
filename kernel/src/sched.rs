@@ -1,93 +1,53 @@
-﻿//! Cooperative scheduler for AuraOS kernel tasks / userspace fibers.
+﻿//! Cooperative scheduler for EL0 processes.
 
 use crate::console;
+use crate::process;
 use crate::timer;
+use crate::trap::TrapAction;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-pub type TaskFn = fn();
-
-const MAX_TASKS: usize = 8;
-
-#[derive(Copy, Clone)]
-struct Task {
-    name: &'static str,
-    entry: Option<TaskFn>,
-    alive: bool,
-}
-
-static mut TASKS: [Task; MAX_TASKS] = [Task {
-    name: "",
-    entry: None,
-    alive: false,
-}; MAX_TASKS];
-
-static TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
-static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static NEXT_IDX: AtomicUsize = AtomicUsize::new(0);
 
 pub fn init() {
-    TASK_COUNT.store(0, Ordering::SeqCst);
-    CURRENT.store(0, Ordering::SeqCst);
-}
-
-pub fn spawn(name: &'static str, entry: TaskFn) -> bool {
-    let idx = TASK_COUNT.load(Ordering::Relaxed);
-    if idx >= MAX_TASKS {
-        return false;
-    }
-    unsafe {
-        TASKS[idx] = Task {
-            name,
-            entry: Some(entry),
-            alive: true,
-        };
-    }
-    TASK_COUNT.fetch_add(1, Ordering::SeqCst);
-    true
+    NEXT_IDX.store(0, Ordering::SeqCst);
 }
 
 pub fn yield_now() {
     timer::tick();
 }
 
-/// Run tasks round-robin until none remain alive.
+/// Run embedded EL0 processes until all have exited.
+/// Safe to re-enter from the EL0 bridge stack after a trap.
 pub fn run() -> ! {
     loop {
-        let count = TASK_COUNT.load(Ordering::Relaxed);
+        let count = process::count();
         if count == 0 {
             console::println("sched: no tasks; halting");
             crate::arch::wait_for_interrupt();
             continue;
         }
+
         let mut ran_any = false;
-        for i in 0..count {
-            CURRENT.store(i, Ordering::Relaxed);
-            let (alive, entry, name) = unsafe {
-                let t = &TASKS[i];
-                (t.alive, t.entry, t.name)
-            };
-            if !alive {
+        let start = NEXT_IDX.load(Ordering::Relaxed) % count.max(1);
+        for off in 0..count {
+            let i = (start + off) % count;
+            if !process::is_alive(i) {
                 continue;
             }
             ran_any = true;
-            if let Some(f) = entry {
-                console::print("sched: run ");
-                console::println(name);
-                f();
-                // Cooperative: one-shot tasks complete and die.
-                unsafe {
-                    TASKS[i].alive = false;
-                }
-            }
-            yield_now();
+            console::print("sched: run ");
+            console::println(process::name_at(i));
+            NEXT_IDX.store(i + 1, Ordering::Relaxed);
+            // process::run erets to EL0; trap path re-enters sched::run().
+            let _action: TrapAction = process::run(i);
+            // Unreachable on success.
         }
+
         if !ran_any {
             console::println("sched: idle");
-            crate::arch::wait_for_interrupt();
+            loop {
+                crate::arch::wait_for_interrupt();
+            }
         }
     }
-}
-
-pub fn current_name() -> &'static str {
-    let i = CURRENT.load(Ordering::Relaxed);
-    unsafe { TASKS[i].name }
 }

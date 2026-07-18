@@ -31,9 +31,9 @@ cargo run -p aura-shell
 .\scripts\run-qemu.ps1
 ```
 
-Requires [QEMU](https://www.qemu.org/) with `qemu-system-aarch64` on `PATH`.
+Requires [QEMU](https://www.qemu.org/) with `qemu-system-aarch64` on `PATH` (or Scoop’s QEMU on `D:\scoop\shims`).
 
-You should see: `AuraOS kernel online` on the serial console (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)).
+Build embeds minimal EL0 guests from `userspace/guest` (init / agent / shell). Serial should show MMU on, SVC ready, then real EL0 processes through `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)).
 
 **Windows note:** WDAC often blocks rustup’s `rust-lld` (os error 4551). Prefer Visual Studio’s `ld.lld` via `.\scripts\fix-linker.ps1` (updates both `.cargo/config.toml` and `kernel/.cargo/config.toml`). Copied `tools\lld.exe` is frequently blocked too.
 

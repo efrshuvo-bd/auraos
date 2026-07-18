@@ -1,0 +1,24 @@
+# Standalone package (built by kernel/build.rs), not a workspace member.
+[workspace]
+
+[package]
+name = "aura-guest"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Minimal no_std EL0 guest programs embedded into the AuraOS kernel"
+publish = false
+
+[[bin]]
+name = "guest-init"
+path = "src/bin/guest_init.rs"
+
+[[bin]]
+name = "guest-agent"
+path = "src/bin/guest_agent.rs"
+
+[[bin]]
+name = "guest-shell"
+path = "src/bin/guest_shell.rs"
+
+[dependencies]
