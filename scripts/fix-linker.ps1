@@ -51,16 +51,6 @@ $configPath = Join-Path $configDir "config.toml"
 Set-Content -Path $configPath -Value $config -Encoding UTF8
 Write-Host "Updated $configPath"
 
-# Keep workspace config in sync (Cargo merges both; stale paths break the link).
-$wsConfigPath = Join-Path $Root ".cargo\config.toml"
-New-Item -ItemType Directory -Force -Path (Split-Path $wsConfigPath) | Out-Null
-$wsConfig = @"
-# Workspace cargo config — prefer WDAC-allowed ld.lld over rustup rust-lld.
-
-[target.aarch64-unknown-none]
-linker = "$linkerEscaped"
-rustflags = ["-C", "link-arg=-T$ldScript"]
-"@
-Set-Content -Path $wsConfigPath -Value $wsConfig -Encoding UTF8
-Write-Host "Updated $wsConfigPath"
+# Do not put aarch64 linker flags in the workspace .cargo/config.toml —
+# guest EL0 builds inherit that file and must use userspace/guest/user.ld.
 Write-Host "Now run: .\scripts\build-kernel.ps1"

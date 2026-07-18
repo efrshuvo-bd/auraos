@@ -9,14 +9,19 @@ extern crate alloc;
 mod arch;
 mod board_pi5;
 mod console;
+mod elf;
+mod exceptions;
 mod frame;
 mod ipc;
 mod mem;
+mod process;
 mod sched;
 mod syscall;
 mod timer;
+mod trap;
 mod uart;
 mod userspace;
+mod virtio;
 mod vm;
 
 use core::panic::PanicInfo;
@@ -33,11 +38,14 @@ pub extern "C" fn kernel_main() -> ! {
     console::println("phase2: heap + frame allocator ready");
 
     vm::init_identity_map();
-    console::println("phase2: identity map installed (stub)");
+    console::println("phase2: identity map installed");
 
+    exceptions::init();
+    virtio::init();
     timer::init();
     console::println("phase2: timer tick armed");
 
+    process::init();
     sched::init();
     syscall::init();
     ipc::init();
@@ -55,9 +63,8 @@ fn panic(info: &PanicInfo) -> ! {
     console::print("KERNEL PANIC: ");
     if let Some(loc) = info.location() {
         console::print(loc.file());
-        console::print(":");
-        // Avoid format machinery for location line in no_std minimally:
         console::println("");
+        let _ = loc;
     } else {
         console::println("unknown location");
     }

@@ -1,8 +1,4 @@
-# Default linker for aarch64-unknown-none.
-# On Windows, if WDAC blocks rust-lld (os error 4551), run: .\scripts\fix-linker.ps1
-
-[target.aarch64-unknown-none]
-linker = "rust-lld"
-rustflags = [
-  "-C", "link-arg=-Taarch64-qemu.ld",
-]
+﻿# Workspace-level cargo config.
+# aarch64-unknown-none linker flags live in kernel/.cargo/config.toml (and
+# userspace/guest/.cargo/config.toml) so guest EL0 builds do not pick up the
+# kernel linker script.

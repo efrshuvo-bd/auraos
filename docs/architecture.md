@@ -5,12 +5,11 @@ AuraOS is a research **agentic mobile OS**: boot → kernel → `init` → **Age
 ## Layers
 
 1. **Boot** — QEMU `-kernel` / UEFI later; linker script at `0x40080000` for virt.
-2. **Kernel (`aura-kernel`)** — UART, heap, frame allocator, VM stub, timer, cooperative scheduler, syscalls (`write`/`yield`/`exit`/`ipc_*`), in-kernel IPC mailboxes, simulated userspace tasks.
+2. **Kernel (`aura-kernel`)** — UART, heap, frame allocator, **EL1 identity MMU**, VBAR/SVC, cooperative scheduler, syscalls (`write`/`read`/`yield`/`exit`/`ipc_*`), in-kernel IPC mailboxes, **ELF64 loader** for embedded EL0 guests, VirtIO-MMIO console TX + **polled RX** (IRQ→GIC deferred).
 3. **Userspace**
-   - `aura-init` — PID 1; fails closed if Agent Core dies at start.
-   - `aura-agent` — Agent Core: tools, memory, pluggable LLM backend.
-   - `aura-shell` — home UI + always-on agent overlay (serial + PPM framebuffer demo).
-4. **Shared** — length-prefixed JSON IPC + tool schemas.
+   - **Guest EL0** (`userspace/guest`) — minimal `no_std` init / agent / shell ELFs embedded into the kernel image and run via `eret` + SVC.
+   - **Host demos** — `aura-init` / `aura-agent` / `aura-shell` (Tokio + TCP) for richer Agent Core work on the development machine.
+4. **Shared** — length-prefixed JSON IPC + tool schemas (host path).
 
 ## Agent as OS primitive
 
@@ -29,6 +28,7 @@ AuraOS is a research **agentic mobile OS**: boot → kernel → `init` → **Age
 
 ## Next kernel milestones
 
-- Real EL1 page tables + userspace EL0
-- VirtIO console / GPU / input
-- ELF loader for init/agent/shell inside the guest
+- VirtIO console IRQ → GIC (RX is polled today via `SYS_READ` / idle `virtio::poll`)
+- Preemptive timer IRQ + richer process table
+- Initrd / VirtIO-blk instead of embedding guest ELFs
+- Real EL0 port of Agent Core tool loop (beyond the demo stubs)
