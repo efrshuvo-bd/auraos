@@ -11,17 +11,34 @@ Privileged AuraOS system service (`agent.core`).
 
 ## Built-in tools
 
-| Tool | Description |
-|------|-------------|
-| `help` | List tools |
-| `system_status` | OS/agent status |
-| `list_services` | Running services |
-| `echo` | Echo text |
+Single source of names (host + guest). Guest IDs live in `userspace/guest/src/agent_ipc.rs` and are mirrored as `shared::tools::TOOL_ID_*`.
+
+| Tool | Guest id | Description |
+|------|----------|-------------|
+| `help` | 1 | List tools |
+| `system_status` | 2 | OS/agent status |
+| `list_services` | 3 | Running services |
+| `echo` | 4 | Echo text |
 
 ## IPC
 
-TCP length-prefixed JSON on host (`127.0.0.1:7420` by default). Same schema lives in `shared` for future in-guest virtio/IPC ports.
+| Track | Transport | Framing |
+|-------|-----------|---------|
+| Host | TCP `127.0.0.1:7420` | Length-prefixed JSON (`shared::ipc`) |
+| Guest EL0 | In-kernel u64 mailboxes | Opcodes on ch2 READY / ch3 REQ / ch4 RESP |
+
+Guest protocol (Sprint 4):
+
+1. Agent posts `READY` (`0xA11E`) on channel 2 and enters a yield loop.
+2. Shell waits for READY (fail-closed on timeout).
+3. Shell posts tool id on channel 3; agent replies `OK|tool_id` on channel 4.
+4. Shell may post `SHUTDOWN` (`0xDEAD`) so agent exits and QEMU can reach `sched: idle`.
 
 ## Failure policy
 
-`init` treats Agent Core as **required**. If it exits during startup, init fails closed and does not present a normal shell session.
+`init` treats Agent Core as **required**. On guest EL0:
+
+- `guest-init` waits for READY; if missing, prints `FAIL CLOSED` and exits without treating the session as healthy.
+- `guest-shell` also refuses a normal session without READY / successful `help` + `system_status`.
+
+True process-wait supervision (waitpid) is still future work; READY + tool timeouts are the Sprint 4 fail-closed signal.

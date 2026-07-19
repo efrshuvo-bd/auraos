@@ -2,6 +2,8 @@
 
 #![no_std]
 
+pub mod agent_ipc;
+
 pub const SYS_WRITE: u64 = 1;
 pub const SYS_YIELD: u64 = 2;
 pub const SYS_EXIT: u64 = 3;
@@ -70,6 +72,18 @@ pub fn ipc_send(channel: u64, payload: u64) {
 
 pub fn ipc_recv(channel: u64) -> u64 {
     unsafe { syscall3(SYS_IPC_RECV, channel, 0, 0) as u64 }
+}
+
+/// Poll mailbox until non-zero or `max_yields` exhausted. Returns 0 on timeout.
+pub fn ipc_recv_wait(channel: u64, max_yields: u32) -> u64 {
+    for _ in 0..max_yields {
+        let v = ipc_recv(channel);
+        if v != 0 {
+            return v;
+        }
+        yield_now();
+    }
+    0
 }
 
 #[panic_handler]

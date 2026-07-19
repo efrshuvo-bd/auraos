@@ -66,7 +66,8 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 
 - Started immediately after IPC is ready; `init` fails closed if Agent Core cannot start.
 - User-facing actions prefer **tool mediation** (`help`, `system_status`, `list_services`, `echo`).
-- Cloud LLM optional (`AURA_LLM_*`); built-in tools work offline.
+- **Guest EL0 (Sprint 4):** `guest-agent` runs a resident tool loop over mailbox IPC; shell requests at least `help` + `system_status`. See `docs/agent-core.md`.
+- Cloud LLM optional (`AURA_LLM_*`) on the **host** path; built-in tools work offline on guest.
 - Kernel stays small; policy + intelligence live in Agent Core.
 
 ## Host vs QEMU
@@ -81,4 +82,5 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 
 - VirtIO console IRQ → GIC (RX still polled)
 - VirtIO-blk for mutable/persistent storage (initrd remains boot path)
-- Real EL0 port of Agent Core tool loop (beyond the demo stubs)
+- ~~Real EL0 port of Agent Core tool loop~~ — Sprint 4 (mailbox opcodes; richer framing later)
+- Guest process wait / init-owned spawn for stronger fail-closed

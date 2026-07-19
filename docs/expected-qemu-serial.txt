@@ -7,6 +7,8 @@
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
 # Guest SYS_READ                   → VirtIO console RX (polled; empty unless typed)
 #
+# Init yields until Agent Core posts READY; shell then requests help + system_status
+# over IPC. Shell asks agent to shutdown so the scheduler can reach idle.
 # During shell's busy-wait, CNTP may preempt several times; up to 3
 # `sched: preempt pid=…` lines are logged (further preemption is silent).
 
@@ -32,21 +34,30 @@ AuraOS entering scheduler
 sched: run init
 init: AuraOS PID 1 online
 init: starting Agent Core (required)
-init: starting shell
-syscall: exit
 sched: run agent.core
 agent.core: privileged service online
-agent.core: tools ready (system_status/echo/list_services/help)
+agent.core: tools ready (help/system_status/list_services/echo)
+agent.core: EL0 tool loop running
+init: Agent Core ready
+init: starting shell
 syscall: exit
 sched: run shell
 shell: home + agent overlay ready
-shell: agent handshake ok (IPC)
+shell: agent handshake ok (IPC READY)
+agent.core: tool help
+agent.core: tools: help, system_status, list_services, echo
+shell: help ok via Agent Core
+agent.core: tool system_status
+agent.core: status ok (guest EL0; kernel IPC)
+shell: system_status ok via Agent Core
 syscall: write
 shell: spinning for preempt smoke
 sched: preempt pid=3
 sched: preempt pid=3
 sched: preempt pid=3
 shell: spin done
-shell: demo complete — ask agent on host via `cargo run -p aura-shell`
+shell: asked agent to shutdown; rich LLM demos stay on host aura-shell
+syscall: exit
+agent.core: shutdown requested
 syscall: exit
 sched: idle
