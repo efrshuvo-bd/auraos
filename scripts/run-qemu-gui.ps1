@@ -1,15 +1,22 @@
-# Run AuraOS under QEMU with a graphical display (ramfb + VirtIO-GPU probe)
+# Run AuraOS under QEMU with a graphical display (ramfb visible by default)
 # while keeping PL011 UART + VirtIO console muxed on stdio for serial logs.
 #
 # Display path (Sprint 5 / SCRUM-29):
 #   -device ramfb                         → fw_cfg "etc/ramfb"; kernel maps 480x800 FB
-#   -device virtio-gpu-device,...          → VirtIO-MMIO GPU (device id 16) probe
-#   -display gtk (or sdl / default)       → host window; falls back if gtk missing
+#   -display gtk (or sdl / default)       → host window shows the ramfb surface
+#   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16) probe
+#                                           (off by default: uninitialized virtio-gpu would
+#                                           steal the window with "Guest has not initialized
+#                                           the display (yet)" until queues/scanout exist)
 #
 # Serial path (unchanged from run-qemu.ps1):
 #   -chardev stdio mux + -serial + virtconsole
 #
 # Headless / CI: use scripts/run-qemu.ps1 (-nographic, no GPU devices).
+param(
+    [switch]$VirtioGpu
+)
+
 $ErrorActionPreference = "Stop"
 $env:Path = "$env:USERPROFILE\.cargo\bin;D:\scoop\shims;$env:Path"
 
@@ -75,10 +82,19 @@ if ($help -notmatch "(?i)\bgtk\b") {
     }
 }
 
+$gpuArgs = @()
+if ($VirtioGpu) {
+    $gpuArgs = @("-device", "virtio-gpu-device,bus=virtio-mmio-bus.1")
+    Write-Host "VirtIO-GPU probe enabled (-VirtioGpu); window may show placeholder until queues exist."
+}
+
 Write-Host "Using QEMU: $qemu"
-Write-Host "Display: $($displayArgs -join ' ')"
+Write-Host "Display: $($displayArgs -join ' ') + ramfb$(if ($VirtioGpu) { ' + virtio-gpu' } else { ' (visible)' })"
 Write-Host "Starting QEMU GUI (serial on this console; Ctrl+A X to exit)..."
-Write-Host "Expect serial: display: virtio-gpu ... and/or display: ramfb mapped 480x800 ..."
+Write-Host "Expect serial: display: ramfb mapped 480x800 ... / ramfb smoke ok ..."
+if (-not $VirtioGpu) {
+    Write-Host "Expect serial: display: no virtio-gpu device  (pass -VirtioGpu to probe)"
+}
 
 & "$qemu" `
     -machine virt,gic-version=2 `
@@ -92,6 +108,6 @@ Write-Host "Expect serial: display: virtio-gpu ... and/or display: ramfb mapped 
     -global virtio-mmio.force-legacy=false `
     -device virtio-serial-device,bus=virtio-mmio-bus.0 `
     -device virtconsole,chardev=char0 `
-    -device virtio-gpu-device,bus=virtio-mmio-bus.1 `
+    @gpuArgs `
     -kernel "$kernelBin" `
     -initrd "$initrd"

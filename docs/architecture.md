@@ -79,12 +79,12 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 | `cargo run -p aura-shell` | Full agentic demo on host (auto-starts agent) |
 | `cargo run -p aura-init` | init → agent → shell |
 | `scripts/build-kernel.ps1` then `scripts/run-qemu.ps1` | Headless kernel + initrd (`-nographic`, virtconsole mux) |
-| `scripts/run-qemu-gui.ps1` | Same + `-device ramfb` + `virtio-gpu-device` + host display window |
+| `scripts/run-qemu-gui.ps1` | Same + `-device ramfb` + host display window (ramfb visible); `-VirtioGpu` adds probe-only `virtio-gpu-device` |
 
 ## Phase 4 notes (Sprint 5)
 
 - **Always-on agent UI:** guest shell prints a Home + Agent status/prompt panel on serial and invokes `help` / `system_status` from that UI path; host `aura-shell` keeps the richer REPL + 480×800 PPM sketch (`framebuffer.rs`).
-- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) and, when `etc/ramfb` exists, configures a 480×800 XRGB8888 surface and draws a solid fill + glyphs. VirtIO-GPU command queues / scanout are deferred.
+- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) when present and, when `etc/ramfb` exists, configures a 480×800 XRGB8888 surface and draws a solid fill + glyphs. VirtIO-GPU command queues / scanout are deferred. GUI default is ramfb-only so the host window shows the smoke paint; `-VirtioGpu` enables the probe (window may show QEMU's uninitialized-GPU placeholder until scanout exists).
 - **QEMU flags:** documented in `scripts/run-qemu-gui.ps1` (gui) and `scripts/run-qemu.ps1` (headless).
 
 ## Next kernel milestones

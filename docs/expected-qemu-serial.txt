@@ -3,10 +3,13 @@
 # `-initrd build/initrd.cpio`, and muxes PL011 UART + VirtIO console onto stdio
 # (order may interleave slightly).
 #
-# GUI path (`scripts/run-qemu-gui.ps1`): same serial mux, plus `-device ramfb`,
-# `-device virtio-gpu-device,bus=virtio-mmio-bus.1`, and a host display window.
-# On GUI boots expect the `display: virtio-gpu…` / `display: ramfb mapped…` /
-# `display: ramfb smoke ok…` lines below; headless skips ramfb with a short note.
+# GUI path (`scripts/run-qemu-gui.ps1`): same serial mux, plus `-device ramfb` and
+# a host display window (ramfb is the visible surface by default).
+# Pass `-VirtioGpu` to also add `-device virtio-gpu-device,bus=virtio-mmio-bus.1`
+# for SCRUM-29 probe logging; until GPU queues/scanout exist the window may then
+# show QEMU's "Guest has not initialized the display (yet)" placeholder.
+# Default GUI boots expect `display: no virtio-gpu device` then
+# `display: ramfb mapped…` / `display: ramfb smoke ok…`; headless skips ramfb.
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
@@ -83,7 +86,12 @@ agent.core: shutdown requested
 syscall: exit
 sched: idle
 
-# --- GUI-only display lines (run-qemu-gui.ps1), replace the two headless display: lines ---
+# --- GUI display lines (run-qemu-gui.ps1 default), replace the two headless display: lines ---
+# display: no virtio-gpu device
+# display: ramfb mapped 480x800 @ 0x…
+# display: ramfb smoke ok (solid fill + glyphs)
+#
+# --- With -VirtioGpu (probe only; window may show QEMU placeholder until scanout) ---
 # display: virtio-gpu at mmio 0x… version=2 (modern) (probe only; queues deferred)
 # display: ramfb mapped 480x800 @ 0x…
 # display: ramfb smoke ok (solid fill + glyphs)
