@@ -3,6 +3,7 @@
 //! Sprint 5 (SCRUM-29): scan VirtIO-MMIO for GPU (device id 16), and when QEMU
 //! exposes `etc/ramfb` via fw_cfg, map a 480×800 XRGB8888 surface, solid-fill,
 //! and draw a few text glyphs (matches host `userspace/shell` visual contract).
+//! Smoke labels use an 8×8 bitmap font painted at 2× scale (16×16 on screen).
 //!
 //! Ramfb is activated only by a fw_cfg **DMA write** of `RAMFBCfg` to `etc/ramfb`.
 //! Byte stores to the fw_cfg DATA register are ignored (QEMU ≥ 2.4); without DMA
@@ -19,6 +20,11 @@ const FB_HEIGHT: u32 = 800;
 const FB_BPP: u32 = 4;
 const FB_STRIDE: u32 = FB_WIDTH * FB_BPP;
 const FB_BYTES: usize = (FB_WIDTH * FB_HEIGHT * FB_BPP) as usize;
+
+/// 8×8 source glyphs, painted with this integer scale for crisp pixels.
+const FONT_SCALE: u32 = 2;
+/// Horizontal advance: glyph width + 2px gap (avoids overlapping).
+const CHAR_ADVANCE: u32 = 8 * FONT_SCALE + 2;
 
 /// DRM_FORMAT_XRGB8888 = fourcc_code('X','R','2','4') = 0x34325258.
 /// Stored big-endian in `RAMFBCfg` (QEMU `be32_to_cpu` on read).
@@ -146,8 +152,8 @@ unsafe fn draw_text(base: usize, x: u32, y: u32, text: &[u8], color: u32) {
     let mut cx = x;
     for &ch in text {
         draw_char(base, cx, y, ch, color);
-        cx += 10;
-        if cx + 8 >= FB_WIDTH {
+        cx += CHAR_ADVANCE;
+        if cx + 8 * FONT_SCALE >= FB_WIDTH {
             break;
         }
     }
@@ -155,47 +161,77 @@ unsafe fn draw_text(base: usize, x: u32, y: u32, text: &[u8], color: u32) {
 
 unsafe fn draw_char(base: usize, x: u32, y: u32, ch: u8, color: u32) {
     let glyph = glyph_for(ch);
+    let px = base as *mut u32;
     for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..5u32 {
-            if bits & (1 << (4 - col)) != 0 {
-                for dy in 0..2u32 {
-                    for dx in 0..2u32 {
-                        let px = x + col * 2 + dx;
-                        let py = y + (row as u32) * 2 + dy;
-                        if px < FB_WIDTH && py < FB_HEIGHT {
-                            let p = (base as *mut u32).add((py * FB_WIDTH + px) as usize);
-                            core::ptr::write_volatile(p, color);
+        for col in 0..8u32 {
+            if bits & (1 << (7 - col)) != 0 {
+                let mut dy = 0u32;
+                while dy < FONT_SCALE {
+                    let mut dx = 0u32;
+                    while dx < FONT_SCALE {
+                        let sx = x + col * FONT_SCALE + dx;
+                        let sy = y + (row as u32) * FONT_SCALE + dy;
+                        if sx < FB_WIDTH && sy < FB_HEIGHT {
+                            core::ptr::write_volatile(
+                                px.add((sy * FB_WIDTH + sx) as usize),
+                                color,
+                            );
                         }
+                        dx += 1;
                     }
+                    dy += 1;
                 }
             }
         }
     }
 }
 
-fn glyph_for(ch: u8) -> [u8; 5] {
+/// Clean 8x8 bitmap glyphs (MSB = leftmost pixel). Covers A-Z, 0-9, and smoke
+/// punctuation; unknown chars render as a hollow box.
+fn glyph_for(ch: u8) -> [u8; 8] {
     match ch.to_ascii_uppercase() {
-        b'A' => [0b01110, 0b10001, 0b11111, 0b10001, 0b10001],
-        b'C' => [0b01111, 0b10000, 0b10000, 0b10000, 0b01111],
-        b'E' => [0b11111, 0b10000, 0b11110, 0b10000, 0b11111],
-        b'G' => [0b01111, 0b10000, 0b10111, 0b10001, 0b01111],
-        b'H' => [0b10001, 0b10001, 0b11111, 0b10001, 0b10001],
-        b'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        b'M' => [0b10001, 0b11011, 0b10101, 0b10001, 0b10001],
-        b'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001],
-        b'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b01110],
-        b'P' => [0b11110, 0b10001, 0b11110, 0b10000, 0b10000],
-        b'R' => [0b11110, 0b10001, 0b11110, 0b10010, 0b10001],
-        b'S' => [0b01111, 0b10000, 0b01110, 0b00001, 0b11110],
-        b'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100],
-        b'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        b'W' => [0b10001, 0b10001, 0b10101, 0b11011, 0b10001],
-        b'Y' => [0b10001, 0b01010, 0b00100, 0b00100, 0b00100],
-        b' ' => [0, 0, 0, 0, 0],
-        b'.' => [0, 0, 0, 0b00100, 0b00100],
-        b'[' => [0b01110, 0b01000, 0b01000, 0b01000, 0b01110],
-        b']' => [0b01110, 0b00010, 0b00010, 0b00010, 0b01110],
-        _ => [0b11111, 0b10001, 0b10001, 0b10001, 0b11111],
+        b' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        b'.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00],
+        b'-' => [0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00],
+        b'[' => [0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00],
+        b']' => [0x3C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x3C, 0x00],
+        b'0' => [0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x3C, 0x00],
+        b'1' => [0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00],
+        b'2' => [0x3C, 0x66, 0x06, 0x0C, 0x18, 0x30, 0x7E, 0x00],
+        b'3' => [0x3C, 0x66, 0x06, 0x1C, 0x06, 0x66, 0x3C, 0x00],
+        b'4' => [0x0C, 0x1C, 0x3C, 0x6C, 0x7E, 0x0C, 0x0C, 0x00],
+        b'5' => [0x7E, 0x60, 0x7C, 0x06, 0x06, 0x66, 0x3C, 0x00],
+        b'6' => [0x1C, 0x30, 0x60, 0x7C, 0x66, 0x66, 0x3C, 0x00],
+        b'7' => [0x7E, 0x06, 0x0C, 0x18, 0x30, 0x30, 0x30, 0x00],
+        b'8' => [0x3C, 0x66, 0x66, 0x3C, 0x66, 0x66, 0x3C, 0x00],
+        b'9' => [0x3C, 0x66, 0x66, 0x3E, 0x06, 0x0C, 0x38, 0x00],
+        b'A' => [0x18, 0x3C, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x00],
+        b'B' => [0x7C, 0x66, 0x66, 0x7C, 0x66, 0x66, 0x7C, 0x00],
+        b'C' => [0x3C, 0x66, 0x60, 0x60, 0x60, 0x66, 0x3C, 0x00],
+        b'D' => [0x78, 0x6C, 0x66, 0x66, 0x66, 0x6C, 0x78, 0x00],
+        b'E' => [0x7E, 0x60, 0x60, 0x7C, 0x60, 0x60, 0x7E, 0x00],
+        b'F' => [0x7E, 0x60, 0x60, 0x7C, 0x60, 0x60, 0x60, 0x00],
+        b'G' => [0x3C, 0x66, 0x60, 0x6E, 0x66, 0x66, 0x3C, 0x00],
+        b'H' => [0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00],
+        b'I' => [0x3C, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00],
+        b'J' => [0x1E, 0x0C, 0x0C, 0x0C, 0x0C, 0x6C, 0x38, 0x00],
+        b'K' => [0x66, 0x6C, 0x78, 0x70, 0x78, 0x6C, 0x66, 0x00],
+        b'L' => [0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x7E, 0x00],
+        b'M' => [0x63, 0x77, 0x7F, 0x6B, 0x63, 0x63, 0x63, 0x00],
+        b'N' => [0x66, 0x76, 0x7E, 0x7E, 0x6E, 0x66, 0x66, 0x00],
+        b'O' => [0x3C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00],
+        b'P' => [0x7C, 0x66, 0x66, 0x7C, 0x60, 0x60, 0x60, 0x00],
+        b'Q' => [0x3C, 0x66, 0x66, 0x66, 0x6A, 0x6C, 0x36, 0x00],
+        b'R' => [0x7C, 0x66, 0x66, 0x7C, 0x78, 0x6C, 0x66, 0x00],
+        b'S' => [0x3C, 0x66, 0x60, 0x3C, 0x06, 0x66, 0x3C, 0x00],
+        b'T' => [0x7E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00],
+        b'U' => [0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00],
+        b'V' => [0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x18, 0x00],
+        b'W' => [0x63, 0x63, 0x63, 0x6B, 0x7F, 0x77, 0x63, 0x00],
+        b'X' => [0x66, 0x66, 0x3C, 0x18, 0x3C, 0x66, 0x66, 0x00],
+        b'Y' => [0x66, 0x66, 0x66, 0x3C, 0x18, 0x18, 0x18, 0x00],
+        b'Z' => [0x7E, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x7E, 0x00],
+        _ => [0x7E, 0x42, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00],
     }
 }
 
