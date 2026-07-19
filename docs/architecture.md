@@ -79,13 +79,13 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 | `cargo run -p aura-shell` | Full agentic demo on host (auto-starts agent) |
 | `cargo run -p aura-init` | init → agent → shell |
 | `scripts/build-kernel.ps1` then `scripts/run-qemu.ps1` | Headless kernel + initrd (`-nographic`, virtconsole mux) |
-| `scripts/run-qemu-gui.ps1` | Same + `-device ramfb` + host display (SDL preferred on Windows; `-DisplayBackend`); `-VirtioGpu` adds probe-only `virtio-gpu-device` |
+| `scripts/run-qemu-gui.ps1` | Same + `-device ramfb` + host display (GTK preferred on Windows; `-DisplayBackend`); `-VirtioGpu` adds probe-only `virtio-gpu-device` |
 
 ## Phase 4 notes (Sprint 5)
 
 - **Always-on agent UI:** guest shell prints a Home + Agent status/prompt panel on serial and invokes `help` / `system_status` from that UI path; host `aura-shell` keeps the richer REPL + 480×800 PPM sketch (`framebuffer.rs`).
-- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) when present and, when `etc/ramfb` exists, configures a 480×800 XRGB8888 surface and draws a solid fill + glyphs. VirtIO-GPU command queues / scanout are deferred. GUI default is ramfb-only so the host window shows the smoke paint; `-VirtioGpu` enables the probe (window may show QEMU's uninitialized-GPU placeholder until scanout exists).
-- **Host display backend:** on Windows, prefer QEMU `-display sdl` — Scoop GTK often lacks gdk-pixbuf loaders (Gtk-WARNING about Adwaita SVG / mime DB) and can stick on a placeholder while guest ramfb is fine. Override with `-DisplayBackend gtk|sdl|default`.
+- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) when present and, when `etc/ramfb` exists, DMA-writes a 28-byte big-endian `RAMFBCfg` (addr/fourcc/flags/w/h/stride) via fw_cfg, then paints a 480×800 XRGB8888 smoke surface. DATA-register fw_cfg stores do not activate ramfb. VirtIO-GPU queues / scanout are deferred. GUI default is ramfb-only; `-VirtioGpu` may show QEMU's uninitialized-GPU placeholder until scanout exists.
+- **Host display backend:** on Windows, prefer QEMU `-display gtk` (Scoop SDL often hangs at host bring-up with no guest serial). GTK pixbuf/Adwaita warnings are cosmetic. Success = visible smoke paint + serial `ramfb smoke ok`. Override with `-DisplayBackend gtk|sdl|default`.
 - **QEMU flags:** documented in `scripts/run-qemu-gui.ps1` (gui) and `scripts/run-qemu.ps1` (headless).
 
 ## Next kernel milestones

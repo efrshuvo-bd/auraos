@@ -1,8 +1,13 @@
 # Run AuraOS under QEMU with a graphical display (ramfb visible by default)
 # while keeping PL011 UART + VirtIO console muxed on stdio for serial logs.
 #
+# Success criteria (both required):
+#   1) Serial: display: ramfb mapped … (fw_cfg DMA) / ramfb smoke ok …
+#   2) Host window: 480x800 teal smoke paint with AURAOS / HOME / AGENT glyphs
+#      — NOT "Guest has not initialized the display (yet)"
+#
 # Display path (Sprint 5 / SCRUM-29):
-#   -device ramfb                         → fw_cfg "etc/ramfb"; kernel maps 480x800 FB
+#   -device ramfb                         → fw_cfg "etc/ramfb"; kernel DMA-writes RAMFBCfg
 #   -display gtk|sdl|default              → host window shows the ramfb surface
 #   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16) probe
 #                                           (off by default: uninitialized virtio-gpu would
@@ -12,8 +17,8 @@
 # Windows / Scoop QEMU host notes:
 #   - SDL often hangs during host display bring-up (black window flash / no guest serial).
 #     Prefer GTK on Windows; override with -DisplayBackend sdl only if your build works.
-#   - Scoop GTK may warn about empty gdk-pixbuf loaders.cache / Adwaita SVG — host packaging,
-#     not guest ramfb. Window + serial should still come up.
+#   - Scoop GTK may warn about empty gdk-pixbuf loaders.cache / Adwaita SVG — host packaging
+#     cosmetic warnings; they do not block ramfb once the kernel uses fw_cfg DMA.
 #   - Launch with WorkingDirectory + PATH = QEMU install dir so SDL/GTK DLLs resolve.
 #
 # Serial path (unchanged from run-qemu.ps1):
@@ -177,11 +182,12 @@ if ($display.Note) {
 }
 Write-Host "Starting QEMU GUI (serial on this console; Ctrl+A X to exit)..."
 Write-Host "Expect serial: AuraOS kernel online ..."
-Write-Host "Expect serial: display: ramfb mapped 480x800 ... / ramfb smoke ok ..."
+Write-Host "Expect serial: display: ramfb mapped 480x800 @ 0x… (fw_cfg DMA)"
+Write-Host "Expect serial: display: ramfb smoke ok (solid fill + glyphs)"
 if (-not $VirtioGpu) {
     Write-Host "Expect serial: display: no virtio-gpu device  (pass -VirtioGpu to probe)"
 }
-Write-Host "Expect window: 480x800 smoke paint (Home/Agent), not a flash-and-exit."
+Write-Host "Expect window: teal 480x800 with AURAOS/HOME/AGENT text (not the QEMU placeholder)."
 Write-Host "Override host UI: -DisplayBackend sdl|gtk|default"
 
 $qemuArgs = @(

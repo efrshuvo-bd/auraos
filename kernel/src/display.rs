@@ -3,6 +3,11 @@
 //! Sprint 5 (SCRUM-29): scan VirtIO-MMIO for GPU (device id 16), and when QEMU
 //! exposes `etc/ramfb` via fw_cfg, map a 480×800 XRGB8888 surface, solid-fill,
 //! and draw a few text glyphs (matches host `userspace/shell` visual contract).
+//!
+//! Ramfb is activated only by a fw_cfg **DMA write** of `RAMFBCfg` to `etc/ramfb`.
+//! Byte stores to the fw_cfg DATA register are ignored (QEMU ≥ 2.4); without DMA
+//! the guest can paint RAM and log success while the host window stays on
+//! "Guest has not initialized the display (yet)".
 
 use crate::console;
 use crate::frame;
@@ -15,22 +20,36 @@ const FB_BPP: u32 = 4;
 const FB_STRIDE: u32 = FB_WIDTH * FB_BPP;
 const FB_BYTES: usize = (FB_WIDTH * FB_HEIGHT * FB_BPP) as usize;
 
-/// DRM_FORMAT_XRGB8888 ('XR24'), big-endian fourcc as stored in ramfb cfg.
+/// DRM_FORMAT_XRGB8888 = fourcc_code('X','R','2','4') = 0x34325258.
+/// Stored big-endian in `RAMFBCfg` (QEMU `be32_to_cpu` on read).
 const FOURCC_XR24: u32 = 0x3432_5258;
 
 /// QEMU virt fw_cfg MMIO (within identity-mapped device window).
+/// Layout: DATA @+0, SELECTOR @+8, DMA address @+16 (64-bit BE; write to +20 triggers).
 const FW_CFG_BASE: usize = 0x0902_0000;
 const FW_CFG_DATA: usize = FW_CFG_BASE;
 const FW_CFG_SELECTOR: usize = FW_CFG_BASE + 0x08;
+const FW_CFG_DMA_ADDR: usize = FW_CFG_BASE + 0x10;
 const FW_CFG_FILE_DIR: u16 = 0x19;
+
+const FW_CFG_DMA_CTL_ERROR: u32 = 0x01;
+const FW_CFG_DMA_CTL_SELECT: u32 = 0x08;
+const FW_CFG_DMA_CTL_WRITE: u32 = 0x10;
+
+/// Guest-side DMA descriptor (all fields big-endian), per QEMU fw_cfg spec.
+#[repr(C, packed)]
+struct FwCfgDmaAccess {
+    control: u32,
+    length: u32,
+    address: u64,
+}
 
 const VIRTIO_ID_GPU: u32 = 16;
 
 pub fn init() {
     probe_virtio_gpu();
     match setup_ramfb() {
-        Ok(addr) => {
-            smoke_draw(addr);
+        Ok(_addr) => {
             console::println("display: ramfb smoke ok (solid fill + glyphs)");
         }
         Err(msg) => {
@@ -62,7 +81,7 @@ fn setup_ramfb() -> Result<usize, &'static str> {
     let pages = (FB_BYTES + frame::PAGE_SIZE - 1) / frame::PAGE_SIZE;
     let addr = alloc_contig_pages(pages).ok_or("framebuffer alloc failed")?;
 
-    // Zero was done per-page; fill comes next in smoke_draw.
+    // RAMFBCfg (28 bytes, all fields big-endian). Must live in guest RAM for DMA.
     let mut cfg = [0u8; 28];
     write_be64(&mut cfg[0..8], addr as u64);
     write_be32(&mut cfg[8..12], FOURCC_XR24);
@@ -71,8 +90,10 @@ fn setup_ramfb() -> Result<usize, &'static str> {
     write_be32(&mut cfg[20..24], FB_HEIGHT);
     write_be32(&mut cfg[24..28], FB_STRIDE);
 
-    fw_cfg_select(select);
-    fw_cfg_write(&cfg);
+    // Paint before activating scanout so the first host blit is not blank.
+    smoke_draw(addr);
+
+    fw_cfg_dma_write(select, &cfg)?;
 
     console::print("display: ramfb mapped ");
     print_u32(FB_WIDTH);
@@ -80,7 +101,7 @@ fn setup_ramfb() -> Result<usize, &'static str> {
     print_u32(FB_HEIGHT);
     console::print(" @ ");
     print_hex_usize(addr);
-    console::println("");
+    console::println(" (fw_cfg DMA)");
     Ok(addr)
 }
 
@@ -237,11 +258,61 @@ fn fw_cfg_read_be32() -> u32 {
     (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
 }
 
-fn fw_cfg_write(bytes: &[u8]) {
+/// Write `buf` into the selected fw_cfg file via the DMA interface.
+///
+/// Ramfb's write callback (`ramfb_fw_cfg_write`) runs when this completes; the
+/// classic DATA-register store path does not perform guest→host writes.
+fn fw_cfg_dma_write(select: u16, buf: &[u8]) -> Result<(), &'static str> {
+    let mut access = FwCfgDmaAccess {
+        control: 0,
+        length: 0,
+        address: 0,
+    };
+    let control =
+        ((select as u32) << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_WRITE;
+    access.control = control.to_be();
+    access.length = (buf.len() as u32).to_be();
+    access.address = (buf.as_ptr() as u64).to_be();
+
+    // Ensure DMA descriptor + payload are visible to the host before trigger.
+    dsb_sy();
+
+    let access_phys = core::ptr::from_ref(&access) as u64;
+    // DMA address register is big-endian; writing the low half (offset +4) starts
+    // the transfer. Clear high half first (addresses are below 4G in virt RAM).
     unsafe {
-        for &b in bytes {
-            core::ptr::write_volatile(FW_CFG_DATA as *mut u8, b);
+        core::ptr::write_volatile(FW_CFG_DMA_ADDR as *mut u32, 0u32);
+        core::ptr::write_volatile(
+            (FW_CFG_DMA_ADDR + 4) as *mut u32,
+            (access_phys as u32).to_be(),
+        );
+    }
+
+    dsb_sy();
+
+    // QEMU completes DMA synchronously; control clears to 0 on success.
+    let mut spins = 0u32;
+    loop {
+        let ctl = u32::from_be(unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(access.control))
+        });
+        if ctl & FW_CFG_DMA_CTL_ERROR != 0 {
+            return Err("fw_cfg DMA write error");
         }
+        if ctl == 0 {
+            return Ok(());
+        }
+        spins = spins.wrapping_add(1);
+        if spins > 1_000_000 {
+            return Err("fw_cfg DMA write timeout");
+        }
+    }
+}
+
+#[inline(always)]
+fn dsb_sy() {
+    unsafe {
+        core::arch::asm!("dsb sy", options(nostack, preserves_flags));
     }
 }
 

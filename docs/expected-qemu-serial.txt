@@ -5,16 +5,17 @@
 #
 # GUI path (`scripts/run-qemu-gui.ps1`): same serial mux, plus `-device ramfb` and
 # a host display window (ramfb is the visible surface by default).
-# On Windows the script prefers `-display sdl` because Scoop GTK often has an empty
-# gdk-pixbuf loaders.cache (Gtk-WARNING about Adwaita SVG / pixbuf) — a host issue
-# that can leave the window on a placeholder even when ramfb smoke succeeded.
+# Success = serial smoke lines AND a visible 480×800 teal paint in the QEMU window
+# (not "Guest has not initialized the display (yet)"). Kernel activates ramfb with
+# a fw_cfg DMA write of RAMFBCfg; DATA-register stores alone leave the placeholder.
+# On Windows the script prefers `-display gtk` (Scoop SDL often hangs before serial).
+# GTK pixbuf/Adwaita warnings are cosmetic host packaging noise.
 # Override: `-DisplayBackend sdl|gtk|default`.
 # Pass `-VirtioGpu` to also add `-device virtio-gpu-device,bus=virtio-mmio-bus.1`
 # for SCRUM-29 probe logging; until GPU queues/scanout exist the window may then
-# show QEMU's "Guest has not initialized the display (yet)" placeholder.
+# show QEMU's placeholder instead of ramfb.
 # Default GUI boots expect `display: no virtio-gpu device` then
-# `display: ramfb mapped…` / `display: ramfb smoke ok…`; headless skips ramfb.
-# Window should show the 480×800 smoke paint (not placeholder text) when using SDL.
+# `display: ramfb mapped… (fw_cfg DMA)` / `display: ramfb smoke ok…`; headless skips ramfb.
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
@@ -93,10 +94,11 @@ sched: idle
 
 # --- GUI display lines (run-qemu-gui.ps1 default), replace the two headless display: lines ---
 # display: no virtio-gpu device
-# display: ramfb mapped 480x800 @ 0x…
+# display: ramfb mapped 480x800 @ 0x… (fw_cfg DMA)
 # display: ramfb smoke ok (solid fill + glyphs)
+# Window: teal 480×800 with AURAOS / HOME / AGENT glyphs (not QEMU placeholder).
 #
 # --- With -VirtioGpu (probe only; window may show QEMU placeholder until scanout) ---
 # display: virtio-gpu at mmio 0x… version=2 (modern) (probe only; queues deferred)
-# display: ramfb mapped 480x800 @ 0x…
+# display: ramfb mapped 480x800 @ 0x… (fw_cfg DMA)
 # display: ramfb smoke ok (solid fill + glyphs)

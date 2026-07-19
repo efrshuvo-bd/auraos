@@ -29,16 +29,16 @@ cargo run -p aura-shell
 ```powershell
 .\scripts\build-kernel.ps1
 .\scripts\run-qemu.ps1          # headless serial (CI)
-.\scripts\run-qemu-gui.ps1      # ramfb window + serial (SDL on Windows by default)
-.\scripts\run-qemu-gui.ps1 -DisplayBackend sdl   # force SDL host window
+.\scripts\run-qemu-gui.ps1      # ramfb window + serial (GTK on Windows by default)
+.\scripts\run-qemu-gui.ps1 -DisplayBackend sdl   # force SDL (often hangs on Scoop)
 .\scripts\run-qemu-gui.ps1 -VirtioGpu            # optional VirtIO-GPU probe (may placeholder)
 ```
 
 Requires [QEMU](https://www.qemu.org/) with `qemu-system-aarch64` on `PATH` (or Scoop’s QEMU on `D:\scoop\shims`).
 
-Guests from `userspace/guest` are packed into `build/initrd.cpio` (not embedded in the kernel). QEMU uses raw `build/aura-kernel.bin` + `-initrd`. Serial should reach `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)). GUI boots draw a 480×800 ramfb smoke surface (Home / Agent glyphs) in the host window. VirtIO-GPU probe is opt-in (`-VirtioGpu`) until queues/scanout exist — otherwise QEMU prefers the uninitialized GPU and shows a blank placeholder.
+Guests from `userspace/guest` are packed into `build/initrd.cpio` (not embedded in the kernel). QEMU uses raw `build/aura-kernel.bin` + `-initrd`. Serial should reach `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)). GUI success = serial `ramfb smoke ok` **and** a visible 480×800 teal smoke paint in the QEMU window (not the placeholder). The kernel activates ramfb via fw_cfg **DMA** write of `RAMFBCfg` (DATA-register stores are ignored). VirtIO-GPU probe is opt-in (`-VirtioGpu`) until queues/scanout exist.
 
-**Windows GUI note:** Scoop QEMU’s GTK UI often warns about Adwaita SVG / pixbuf loaders (`loaders.cache` empty) and can leave the window on “Guest has not initialized the display (yet)” even when serial shows `ramfb smoke ok`. That is a host packaging issue; `run-qemu-gui.ps1` defaults to `-display sdl` on Windows. No extra Scoop package is required if `qemu-system-aarch64 -display help` lists `sdl` (Scoop’s build ships `SDL2.dll`).
+**Windows GUI note:** Scoop QEMU’s GTK may warn about Adwaita SVG / empty `loaders.cache` — cosmetic host packaging noise; ignore unless the window is blank after `ramfb smoke ok`. Default is `-display gtk` because Scoop SDL often hangs before guest serial appears.
 
 **CI:** GitHub Actions (`.github/workflows/ci.yml`) builds the host workspace and the aarch64 kernel/initrd on every PR to `devel` / `master`.
 
