@@ -28,12 +28,13 @@ cargo run -p aura-shell
 
 ```powershell
 .\scripts\build-kernel.ps1
-.\scripts\run-qemu.ps1
+.\scripts\run-qemu.ps1          # headless serial (CI)
+.\scripts\run-qemu-gui.ps1      # ramfb + VirtIO-GPU window + serial
 ```
 
 Requires [QEMU](https://www.qemu.org/) with `qemu-system-aarch64` on `PATH` (or Scoop’s QEMU on `D:\scoop\shims`).
 
-Guests from `userspace/guest` are packed into `build/initrd.cpio` (not embedded in the kernel). QEMU uses raw `build/aura-kernel.bin` + `-initrd`. Serial should reach `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)).
+Guests from `userspace/guest` are packed into `build/initrd.cpio` (not embedded in the kernel). QEMU uses raw `build/aura-kernel.bin` + `-initrd`. Serial should reach `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)). GUI boots also draw a 480×800 ramfb smoke surface (Home / Agent glyphs).
 
 **CI:** GitHub Actions (`.github/workflows/ci.yml`) builds the host workspace and the aarch64 kernel/initrd on every PR to `devel` / `master`.
 

@@ -207,15 +207,21 @@ pub fn poll() {
 }
 
 fn find_console() -> Option<usize> {
+    find_device(VIRTIO_ID_CONSOLE).map(|(base, _)| base)
+}
+
+/// Scan VirtIO-MMIO slots for `device_id`. Returns `(mmio_base, version)`.
+pub fn find_device(device_id: u32) -> Option<(usize, u32)> {
     for i in 0..8 {
         let base = VIRTIO_MMIO_BASE + i * VIRTIO_MMIO_STRIDE;
         let magic = unsafe { r32(base, REG_MAGIC) };
         if magic != VIRTIO_MAGIC {
             continue;
         }
-        let device_id = unsafe { r32(base, REG_DEVICE_ID) };
-        if device_id == VIRTIO_ID_CONSOLE {
-            return Some(base);
+        let id = unsafe { r32(base, REG_DEVICE_ID) };
+        if id == device_id {
+            let version = unsafe { r32(base, REG_VERSION) };
+            return Some((base, version));
         }
     }
     None

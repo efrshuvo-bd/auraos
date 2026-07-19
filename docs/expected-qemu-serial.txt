@@ -3,14 +3,19 @@
 # `-initrd build/initrd.cpio`, and muxes PL011 UART + VirtIO console onto stdio
 # (order may interleave slightly).
 #
+# GUI path (`scripts/run-qemu-gui.ps1`): same serial mux, plus `-device ramfb`,
+# `-device virtio-gpu-device,bus=virtio-mmio-bus.1`, and a host display window.
+# On GUI boots expect the `display: virtio-gpu…` / `display: ramfb mapped…` /
+# `display: ramfb smoke ok…` lines below; headless skips ramfb with a short note.
+#
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
 # Guest SYS_READ                   → VirtIO console RX (polled; empty unless typed)
 #
-# Init yields until Agent Core posts READY; shell then requests help + system_status
-# over IPC. Shell asks agent to shutdown so the scheduler can reach idle.
-# During shell's busy-wait, CNTP may preempt several times; up to 3
-# `sched: preempt pid=…` lines are logged (further preemption is silent).
+# Init yields until Agent Core posts READY; shell presents Home+Agent UI, then
+# requests help + system_status over IPC from that UI path. Shell asks agent to
+# shutdown so the scheduler can reach idle. During shell's busy-wait, CNTP may
+# preempt several times; up to 3 `sched: preempt pid=…` lines are logged.
 
 AuraOS kernel online
 phase1: uart + panic + frame allocator
@@ -22,6 +27,8 @@ exception: VBAR_EL1 installed (SVC+IRQ)
 virtio: console at mmio version=2 (modern)
 virtio: console TX/RX ready (RX polled; IRQ deferred)
 virtio: RX poll ok (empty)
+display: no virtio-gpu device
+display: ramfb skip - no etc/ramfb (use run-qemu-gui.ps1)
 gic: v2 ready (CNTP PPI 30)
 timer: CNTP armed (100 Hz, IRQ preempt)
 phase2: gic + timer IRQ armed
@@ -44,9 +51,23 @@ syscall: exit
 sched: run shell
 shell: home + agent overlay ready
 shell: agent handshake ok (IPC READY)
++------------ Home --------------------+
+|  AuraOS                              |
+|  Agent always on                     |
+|                                      |
+|  [ Agent ]   [ Status ]   [ Apps ]   |
++--------------------------------------+
++-- Agent -----------------------------
+| status: ready                        |
+| prompt: Ask anything...              |
+| tools: [help] [status] [services]    |
++--------------------------------------
+shell: UI surface up (serial); host PPM in userspace/shell
+shell: UI -> tool help
 agent.core: tool help
 agent.core: tools: help, system_status, list_services, echo
 shell: help ok via Agent Core
+shell: UI -> tool status
 agent.core: tool system_status
 agent.core: status ok (guest EL0; kernel IPC)
 shell: system_status ok via Agent Core
@@ -61,3 +82,8 @@ syscall: exit
 agent.core: shutdown requested
 syscall: exit
 sched: idle
+
+# --- GUI-only display lines (run-qemu-gui.ps1), replace the two headless display: lines ---
+# display: virtio-gpu at mmio 0x… version=2 (modern) (probe only; queues deferred)
+# display: ramfb mapped 480x800 @ 0x…
+# display: ramfb smoke ok (solid fill + glyphs)

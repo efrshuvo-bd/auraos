@@ -11,6 +11,7 @@ mod board_pi5;
 mod bootinfo;
 mod console;
 mod cpio;
+mod display;
 mod elf;
 mod exceptions;
 mod fdt;
@@ -34,6 +35,7 @@ use core::panic::PanicInfo;
 pub extern "C" fn kernel_main(fdt: usize) -> ! {
     let _board = board_pi5::BOARD;
     uart::init();
+    arch::enable_fp_simd();
     console::println("AuraOS kernel online");
     console::println("phase1: uart + panic + frame allocator");
 
@@ -56,6 +58,7 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
 
     exceptions::init();
     virtio::init();
+    display::init();
     timer::init();
     console::println("phase2: gic + timer IRQ armed");
 

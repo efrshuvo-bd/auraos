@@ -36,6 +36,17 @@ pub fn wait_for_interrupt() {
     unsafe { asm!("wfi", options(nomem, nostack)) }
 }
 
+/// Allow NEON/FP at EL1 (target enables `+neon,+fp-armv8`; compiler may emit `movi` etc.).
+pub fn enable_fp_simd() {
+    unsafe {
+        let mut cpacr: u64;
+        asm!("mrs {0}, cpacr_el1", out(reg) cpacr, options(nostack));
+        cpacr |= 0b11 << 20; // FPEN = no trap at EL0/EL1
+        asm!("msr cpacr_el1, {0}", in(reg) cpacr, options(nostack));
+        asm!("isb", options(nostack));
+    }
+}
+
 pub fn current_el() -> u64 {
     let el: u64;
     unsafe {

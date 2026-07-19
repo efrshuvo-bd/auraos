@@ -1,4 +1,15 @@
-# Run AuraOS kernel under QEMU aarch64 virt (serial stdio)
+# Run AuraOS under QEMU with a graphical display (ramfb + VirtIO-GPU probe)
+# while keeping PL011 UART + VirtIO console muxed on stdio for serial logs.
+#
+# Display path (Sprint 5 / SCRUM-29):
+#   -device ramfb                         → fw_cfg "etc/ramfb"; kernel maps 480x800 FB
+#   -device virtio-gpu-device,...          → VirtIO-MMIO GPU (device id 16) probe
+#   -display gtk (or sdl / default)       → host window; falls back if gtk missing
+#
+# Serial path (unchanged from run-qemu.ps1):
+#   -chardev stdio mux + -serial + virtconsole
+#
+# Headless / CI: use scripts/run-qemu.ps1 (-nographic, no GPU devices).
 $ErrorActionPreference = "Stop"
 $env:Path = "$env:USERPROFILE\.cargo\bin;D:\scoop\shims;$env:Path"
 
@@ -43,7 +54,6 @@ if (-not $qemu) {
     Write-Host "Install options:"
     Write-Host "  `$env:SCOOP='D:\scoop'; scoop install qemu"
     Write-Host "  winget install SoftwareFreedomConservancy.QEMU"
-    Write-Host "  or run the Weilnetz setup and ensure qemu-system-aarch64.exe is on PATH"
     exit 1
 }
 
@@ -54,23 +64,34 @@ if (-not (Test-Path -LiteralPath $initrd)) {
     throw "Initrd not found at $initrd - run scripts/build-kernel.ps1"
 }
 
+# Prefer gtk; many Windows builds ship sdl or a default display backend.
+$displayArgs = @("-display", "gtk")
+$help = & "$qemu" -display help 2>&1 | Out-String
+if ($help -notmatch "(?i)\bgtk\b") {
+    if ($help -match "(?i)\bsdl\b") {
+        $displayArgs = @("-display", "sdl")
+    } else {
+        $displayArgs = @("-display", "default")
+    }
+}
+
 Write-Host "Using QEMU: $qemu"
-Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
-Write-Host "Headless serial path (-nographic). For ramfb/VirtIO-GPU GUI: .\scripts\run-qemu-gui.ps1"
-# Raw kernel.bin (not ELF): QEMU Linux boot path loads -initrd and passes FDT in x0.
-# Guests come from initrd cpio; VirtIO console for guest SYS_WRITE; UART for early boot.
-# Mux stdio so PL011 + virtconsole share the same terminal.
-# No -device ramfb / virtio-gpu here (CI-friendly); display::init will log skips.
+Write-Host "Display: $($displayArgs -join ' ')"
+Write-Host "Starting QEMU GUI (serial on this console; Ctrl+A X to exit)..."
+Write-Host "Expect serial: display: virtio-gpu ... and/or display: ramfb mapped 480x800 ..."
+
 & "$qemu" `
     -machine virt,gic-version=2 `
     -cpu cortex-a57 `
     -m 512M `
-    -nographic `
+    @displayArgs `
+    -device ramfb `
     -chardev stdio,id=char0,mux=on,signal=off `
     -serial chardev:char0 `
     -mon chardev=char0 `
     -global virtio-mmio.force-legacy=false `
     -device virtio-serial-device,bus=virtio-mmio-bus.0 `
     -device virtconsole,chardev=char0 `
+    -device virtio-gpu-device,bus=virtio-mmio-bus.1 `
     -kernel "$kernelBin" `
     -initrd "$initrd"
