@@ -19,6 +19,7 @@ mod frame;
 mod gic;
 mod ipc;
 mod mem;
+mod ota;
 mod process;
 mod sched;
 mod syscall;
@@ -59,6 +60,8 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
 
     exceptions::init();
     virtio::init();
+    virtio::probe_block_stub();
+    ota::init();
     display::init();
     timer::init();
     console::println("phase2: gic + timer IRQ armed");

@@ -3,7 +3,7 @@ name = "shared"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "AuraOS shared IPC protocol and tool schemas"
+description = "AuraOS shared IPC protocol, tool schemas, and OTA metadata"
 
 [dependencies]
 serde = { workspace = true }

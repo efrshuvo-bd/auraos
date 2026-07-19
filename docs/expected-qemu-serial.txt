@@ -37,6 +37,9 @@ exception: VBAR_EL1 installed (SVC+IRQ)
 virtio: console at mmio version=2 (modern)
 virtio: console TX/RX ready (RX polled; IRQ deferred)
 virtio: RX poll ok (empty)
+virtio: no blk device (A/B storage design: see docs/updates-4y.md + ota/)
+ota: channels=os,agent,models (A/B metadata in ota/; apply deferred)
+ota: A/B not applied
 display: no virtio-gpu device
 display: ramfb skip - no etc/ramfb (use run-qemu-gui.ps1)
 gic: v2 ready (CNTP PPI 30)

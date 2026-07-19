@@ -30,6 +30,23 @@ pub const GIC_EXPECTATION: &str = "GICv2 or GICv3 per device tree — re-probe; 
 pub const BOOT_PATH_NOTE: &str =
     "Pi firmware → kernel image + DTB; differs from QEMU raw -kernel @ 0x40080000";
 
+/// Compile-time feature flags for the Pi 5 port.
+///
+/// All `false` until a dedicated board image wires real drivers. These exist so
+/// call sites can gate on named capabilities instead of inventing fake hardware.
+pub mod features {
+    /// PL011 (or SoC UART) early console on real Pi MMIO.
+    pub const UART_EARLY_CONSOLE: bool = false;
+    /// Device-tree memory map → frame allocator.
+    pub const DT_MEMORY_MAP: bool = false;
+    /// GICv2/v3 from Pi DT (not QEMU virt defaults).
+    pub const GIC_FROM_DT: bool = false;
+    /// SD/eMMC (or equivalent) storage for A/B slots.
+    pub const STORAGE_AB_SLOTS: bool = false;
+    /// On-device OTA apply path (host verify already exists).
+    pub const OTA_ON_DEVICE_APPLY: bool = false;
+}
+
 /// Compile-time board profile. Default build is QEMU virt (`BoardProfile::QemuVirt`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoardProfile {
@@ -52,4 +69,13 @@ pub fn status_line() -> &'static str {
             "board: raspberry-pi-5 research profile (incomplete)"
         }
     }
+}
+
+/// Whether any real Pi 5 driver feature is enabled (always false today).
+pub fn any_pi5_driver_enabled() -> bool {
+    features::UART_EARLY_CONSOLE
+        || features::DT_MEMORY_MAP
+        || features::GIC_FROM_DT
+        || features::STORAGE_AB_SLOTS
+        || features::OTA_ON_DEVICE_APPLY
 }

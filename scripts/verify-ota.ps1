@@ -26,35 +26,40 @@ function Test-ApplicationControlBlocked {
 }
 
 function Test-OtaFixturesContract {
-    # Mirrors aura-ota-verify: reject unsigned / empty; accept literal "dev-signed".
-    $unsignedPath = Join-Path $root "ota\fixtures\unsigned-os.json"
-    $signedPath = Join-Path $root "ota\fixtures\signed-os.json"
-
-    $unsigned = Get-Content -Raw -Path $unsignedPath | ConvertFrom-Json
-    $signed = Get-Content -Raw -Path $signedPath | ConvertFrom-Json
-
-    $unsignedSig = $unsigned.signature
-    if ($null -ne $unsignedSig -and "$unsignedSig".Trim() -ne "") {
-        Write-Error "unsigned fixture must lack a usable signature (got: $unsignedSig)"
-        return $false
-    }
-
-    if ("$($signed.signature)".Trim() -ne "dev-signed") {
-        Write-Error "signed fixture must use signature 'dev-signed' (got: $($signed.signature))"
-        return $false
-    }
-
+    # Mirrors shared::ota::verify_manifest: reject unsigned / empty; accept "dev-signed".
+    $pairs = @(
+        @{ Unsigned = "unsigned-os.json"; Signed = "signed-os.json"; Channel = "os" },
+        @{ Unsigned = "unsigned-agent.json"; Signed = "signed-agent.json"; Channel = "agent" },
+        @{ Unsigned = "unsigned-models.json"; Signed = "signed-models.json"; Channel = "models" }
+    )
     $known = @("os", "agent", "models")
-    if ($unsigned.channel -notin $known) {
-        Write-Error "unsigned fixture has unknown channel: $($unsigned.channel)"
-        return $false
-    }
-    if ($signed.channel -notin $known) {
-        Write-Error "signed fixture has unknown channel: $($signed.channel)"
-        return $false
+
+    foreach ($pair in $pairs) {
+        $unsignedPath = Join-Path $root "ota\fixtures\$($pair.Unsigned)"
+        $signedPath = Join-Path $root "ota\fixtures\$($pair.Signed)"
+        $unsigned = Get-Content -Raw -Path $unsignedPath | ConvertFrom-Json
+        $signed = Get-Content -Raw -Path $signedPath | ConvertFrom-Json
+
+        $unsignedSig = $unsigned.signature
+        if ($null -ne $unsignedSig -and "$unsignedSig".Trim() -ne "") {
+            Write-Error "$($pair.Unsigned) must lack a usable signature (got: $unsignedSig)"
+            return $false
+        }
+        if ("$($signed.signature)".Trim() -ne "dev-signed") {
+            Write-Error "$($pair.Signed) must use signature 'dev-signed' (got: $($signed.signature))"
+            return $false
+        }
+        if ($unsigned.channel -ne $pair.Channel -or $signed.channel -ne $pair.Channel) {
+            Write-Error "channel mismatch for $($pair.Channel) fixtures"
+            return $false
+        }
+        if ($unsigned.channel -notin $known -or $signed.channel -notin $known) {
+            Write-Error "unknown channel in fixtures for $($pair.Channel)"
+            return $false
+        }
     }
 
-    Write-Host "fixture contract ok: reject unsigned-os.json, accept signed-os.json (dev-signed)"
+    Write-Host "fixture contract ok: reject unsigned-{os,agent,models}, accept signed-* (dev-signed)"
     return $true
 }
 
