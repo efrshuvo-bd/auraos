@@ -60,10 +60,12 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
 
     exceptions::init();
     virtio::init();
-    virtio::probe_block_stub();
+    virtio::init_block();
     ota::init();
     display::init();
     timer::init();
+    // Register VirtIO console SPI after GIC is up (SCRUM-34).
+    virtio::enable_irqs();
     console::println("phase2: gic + timer IRQ armed");
 
     process::init();

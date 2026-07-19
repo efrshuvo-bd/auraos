@@ -7,6 +7,7 @@ use crate::process;
 use crate::syscall;
 use crate::timer;
 use crate::trap::{TrapAction, TrapFrame};
+use crate::virtio;
 use core::arch::{asm, naked_asm};
 
 /// Exception vector table — each entry is 0x80 bytes (`.align 7`).
@@ -137,7 +138,9 @@ unsafe extern "C" fn el1_irq_entry() {
 extern "C" fn el1_irq_rust() {
     let irq = gic::ack();
     if irq < 1020 {
-        let _ = timer::handle_irq(irq);
+        if !timer::handle_irq(irq) {
+            let _ = virtio::handle_irq(irq);
+        }
         gic::eoi(irq);
     }
 }
@@ -336,6 +339,8 @@ extern "C" fn el0_irq_rust(sp: *mut u64) -> u64 {
     if irq < 1020 {
         if timer::handle_irq(irq) {
             action = TrapAction::Preempt;
+        } else {
+            let _ = virtio::handle_irq(irq);
         }
         gic::eoi(irq);
     }

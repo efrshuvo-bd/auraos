@@ -33,12 +33,19 @@ pub fn init() {
         w32(GICC_BASE, GICC_CTLR, 1);
         w32(GICC_BASE, GICC_PMR, 0xff);
 
-        enable_irq(IRQ_CNTP);
+        enable_irq_inner(IRQ_CNTP);
     }
     crate::console::println("gic: v2 ready (CNTP PPI 30)");
 }
 
-unsafe fn enable_irq(irq: u32) {
+/// Enable an SPI/PPI in the distributor (CPU0 target for SPIs).
+pub fn enable_irq(irq: u32) {
+    unsafe {
+        enable_irq_inner(irq);
+    }
+}
+
+unsafe fn enable_irq_inner(irq: u32) {
     let reg = (irq / 32) as usize;
     let bit = irq % 32;
     let isen = GICD_ISENABLER + reg * 4;
