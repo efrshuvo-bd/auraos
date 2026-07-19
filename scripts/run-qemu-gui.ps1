@@ -3,20 +3,22 @@
 #
 # Display path (Sprint 5 / SCRUM-29):
 #   -device ramfb                         → fw_cfg "etc/ramfb"; kernel maps 480x800 FB
-#   -display sdl|gtk|default              → host window shows the ramfb surface
+#   -display gtk|sdl|default              → host window shows the ramfb surface
 #   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16) probe
 #                                           (off by default: uninitialized virtio-gpu would
 #                                           steal the window with "Guest has not initialized
 #                                           the display (yet)" until queues/scanout exist)
 #
-# Windows / Scoop QEMU host note:
-#   Scoop's GTK build often ships an empty gdk-pixbuf loaders.cache (and may warn:
-#   "Could not load a pixbuf from .../Adwaita/assets/...svg"). That is a *host*
-#   packaging issue - the guest ramfb path can be fine while the GTK window stays
-#   stuck on QEMU's placeholder. Prefer SDL on Windows; override with -DisplayBackend.
+# Windows / Scoop QEMU host notes:
+#   - SDL often hangs during host display bring-up (black window flash / no guest serial).
+#     Prefer GTK on Windows; override with -DisplayBackend sdl only if your build works.
+#   - Scoop GTK may warn about empty gdk-pixbuf loaders.cache / Adwaita SVG — host packaging,
+#     not guest ramfb. Window + serial should still come up.
+#   - Launch with WorkingDirectory + PATH = QEMU install dir so SDL/GTK DLLs resolve.
 #
 # Serial path (unchanged from run-qemu.ps1):
 #   -chardev stdio mux + -serial + virtconsole
+#   (no -nographic — that conflicts with a host display window)
 #
 # Headless / CI: use scripts/run-qemu.ps1 (-nographic, no GPU devices).
 param(
@@ -90,7 +92,12 @@ function Resolve-DisplayBackend {
         if (-not $hasSdl) {
             throw "QEMU at $QemuPath does not list -display sdl. Available backends:`n$help"
         }
-        return @{ Args = @("-display", "sdl"); Name = "sdl"; Note = $null }
+        $note = $null
+        if ($env:OS -eq "Windows_NT") {
+            $note = "SDL on Windows Scoop QEMU often hangs before guest boot (no serial). If the window flashes/exits or serial is silent, re-run with -DisplayBackend gtk."
+        }
+        # gl=off avoids some Windows OpenGL/SDL bring-up stalls
+        return @{ Args = @("-display", "sdl,gl=off"); Name = "sdl"; Note = $note }
     }
 
     if ($Requested -eq "gtk") {
@@ -99,25 +106,26 @@ function Resolve-DisplayBackend {
         }
         $note = $null
         if ($env:OS -eq "Windows_NT") {
-            $note = "GTK on Windows Scoop QEMU often lacks gdk-pixbuf loaders (empty loaders.cache); if the window stays on a placeholder, re-run with -DisplayBackend sdl."
+            $note = "GTK on Windows Scoop QEMU may warn about gdk-pixbuf/Adwaita SVG (host packaging). Serial + ramfb should still work; ignore pixbuf warnings unless the window is blank."
         }
         return @{ Args = @("-display", "gtk"); Name = "gtk"; Note = $note }
     }
 
-    # default: prefer SDL on Windows (avoids broken Scoop GTK / pixbuf), else gtk, else sdl, else QEMU default
+    # default: prefer GTK on Windows (Scoop SDL hangs during display bring-up — no guest serial).
+    # Non-Windows: prefer gtk, then sdl, else QEMU default.
     if ($env:OS -eq "Windows_NT") {
-        if ($hasSdl) {
-            return @{
-                Args = @("-display", "sdl")
-                Name = "sdl"
-                Note = 'Windows default: SDL (Scoop GTK often broken - Gtk-WARNING about Adwaita SVG / pixbuf loaders is a host packaging issue, not guest ramfb).'
-            }
-        }
         if ($hasGtk) {
             return @{
                 Args = @("-display", "gtk")
                 Name = "gtk"
-                Note = 'SDL unavailable; using GTK. If you see Gtk-WARNING about pixbuf/mime or a stuck placeholder, install a QEMU build with SDL or fix gdk-pixbuf loaders.'
+                Note = 'Windows default: GTK (Scoop SDL often hangs at host display bring-up with no guest serial). Override: -DisplayBackend sdl'
+            }
+        }
+        if ($hasSdl) {
+            return @{
+                Args = @("-display", "sdl,gl=off")
+                Name = "sdl"
+                Note = 'GTK unavailable; using SDL with gl=off. If the window flashes or serial is silent, install a QEMU build with working GTK.'
             }
         }
     } else {
@@ -157,31 +165,50 @@ if ($VirtioGpu) {
     Write-Host "VirtIO-GPU probe enabled (-VirtioGpu); window may show placeholder until queues exist."
 }
 
+$qemuDir = Split-Path -Parent $qemu
+# Scoop/Weilnetz QEMU loads SDL/GTK DLLs from the install dir — keep it on PATH and as cwd.
+$env:Path = "$qemuDir;$env:Path"
+
 Write-Host "Using QEMU: $qemu"
+Write-Host "QEMU dir (PATH/cwd): $qemuDir"
 Write-Host "Display: $($displayArgs -join ' ') + ramfb$(if ($VirtioGpu) { ' + virtio-gpu' } else { ' (visible)' })"
 if ($display.Note) {
     Write-Host $display.Note
 }
 Write-Host "Starting QEMU GUI (serial on this console; Ctrl+A X to exit)..."
+Write-Host "Expect serial: AuraOS kernel online ..."
 Write-Host "Expect serial: display: ramfb mapped 480x800 ... / ramfb smoke ok ..."
 if (-not $VirtioGpu) {
     Write-Host "Expect serial: display: no virtio-gpu device  (pass -VirtioGpu to probe)"
 }
-Write-Host "Expect window: 480x800 smoke paint (Home/Agent), not GTK placeholder text."
+Write-Host "Expect window: 480x800 smoke paint (Home/Agent), not a flash-and-exit."
 Write-Host "Override host UI: -DisplayBackend sdl|gtk|default"
 
-& "$qemu" `
-    -machine virt,gic-version=2 `
-    -cpu cortex-a57 `
-    -m 512M `
-    @displayArgs `
-    -device ramfb `
-    -chardev stdio,id=char0,mux=on,signal=off `
-    -serial chardev:char0 `
-    -mon chardev=char0 `
-    -global virtio-mmio.force-legacy=false `
-    -device virtio-serial-device,bus=virtio-mmio-bus.0 `
-    -device virtconsole,chardev=char0 `
-    @gpuArgs `
-    -kernel "$kernelBin" `
-    -initrd "$initrd"
+$qemuArgs = @(
+    "-machine", "virt,gic-version=2"
+    "-cpu", "cortex-a57"
+    "-m", "512M"
+) + $displayArgs + @(
+    "-device", "ramfb"
+    "-chardev", "stdio,id=char0,mux=on,signal=off"
+    "-serial", "chardev:char0"
+    "-mon", "chardev=char0"
+    "-global", "virtio-mmio.force-legacy=false"
+    "-device", "virtio-serial-device,bus=virtio-mmio-bus.0"
+    "-device", "virtconsole,chardev=char0"
+) + $gpuArgs + @(
+    "-kernel", "$kernelBin"
+    "-initrd", "$initrd"
+)
+
+$exitCode = 0
+Push-Location -LiteralPath $qemuDir
+try {
+    & "$qemu" @qemuArgs
+    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+} finally {
+    Pop-Location
+}
+
+Write-Host "QEMU exited with code $exitCode (LASTEXITCODE=$exitCode)"
+exit $exitCode
