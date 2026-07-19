@@ -3,18 +3,26 @@
 #
 # Display path (Sprint 5 / SCRUM-29):
 #   -device ramfb                         → fw_cfg "etc/ramfb"; kernel maps 480x800 FB
-#   -display gtk (or sdl / default)       → host window shows the ramfb surface
+#   -display sdl|gtk|default              → host window shows the ramfb surface
 #   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16) probe
 #                                           (off by default: uninitialized virtio-gpu would
 #                                           steal the window with "Guest has not initialized
 #                                           the display (yet)" until queues/scanout exist)
+#
+# Windows / Scoop QEMU host note:
+#   Scoop's GTK build often ships an empty gdk-pixbuf loaders.cache (and may warn:
+#   "Could not load a pixbuf from .../Adwaita/assets/...svg"). That is a *host*
+#   packaging issue — the guest ramfb path can be fine while the GTK window stays
+#   stuck on QEMU's placeholder. Prefer SDL on Windows; override with -DisplayBackend.
 #
 # Serial path (unchanged from run-qemu.ps1):
 #   -chardev stdio mux + -serial + virtconsole
 #
 # Headless / CI: use scripts/run-qemu.ps1 (-nographic, no GPU devices).
 param(
-    [switch]$VirtioGpu
+    [switch]$VirtioGpu,
+    [ValidateSet("default", "sdl", "gtk")]
+    [string]$DisplayBackend = "default"
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +63,75 @@ function Find-QemuAarch64 {
     return $null
 }
 
+function Get-QemuDisplayHelp {
+    param([Parameter(Mandatory = $true)][string]$QemuPath)
+    return (& "$QemuPath" -display help 2>&1 | Out-String)
+}
+
+function Test-DisplayBackendAvailable {
+    param(
+        [Parameter(Mandatory = $true)][string]$HelpText,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    return ($HelpText -match "(?im)^\s*$([regex]::Escape($Name))\s*$")
+}
+
+function Resolve-DisplayBackend {
+    param(
+        [Parameter(Mandatory = $true)][string]$QemuPath,
+        [Parameter(Mandatory = $true)][string]$Requested
+    )
+
+    $help = Get-QemuDisplayHelp -QemuPath $QemuPath
+    $hasSdl = Test-DisplayBackendAvailable -HelpText $help -Name "sdl"
+    $hasGtk = Test-DisplayBackendAvailable -HelpText $help -Name "gtk"
+
+    if ($Requested -eq "sdl") {
+        if (-not $hasSdl) {
+            throw "QEMU at $QemuPath does not list -display sdl. Available backends:`n$help"
+        }
+        return @{ Args = @("-display", "sdl"); Name = "sdl"; Note = $null }
+    }
+
+    if ($Requested -eq "gtk") {
+        if (-not $hasGtk) {
+            throw "QEMU at $QemuPath does not list -display gtk. Available backends:`n$help"
+        }
+        $note = $null
+        if ($env:OS -eq "Windows_NT") {
+            $note = "GTK on Windows Scoop QEMU often lacks gdk-pixbuf loaders (empty loaders.cache); if the window stays on a placeholder, re-run with -DisplayBackend sdl."
+        }
+        return @{ Args = @("-display", "gtk"); Name = "gtk"; Note = $note }
+    }
+
+    # default: prefer SDL on Windows (avoids broken Scoop GTK / pixbuf), else gtk, else sdl, else QEMU default
+    if ($env:OS -eq "Windows_NT") {
+        if ($hasSdl) {
+            return @{
+                Args = @("-display", "sdl")
+                Name = "sdl"
+                Note = "Windows default: SDL (Scoop GTK often broken — Gtk-WARNING about Adwaita SVG / pixbuf loaders is a host packaging issue, not guest ramfb)."
+            }
+        }
+        if ($hasGtk) {
+            return @{
+                Args = @("-display", "gtk")
+                Name = "gtk"
+                Note = "SDL unavailable; using GTK. If you see Gtk-WARNING about pixbuf/mime or a stuck placeholder, install a QEMU build with SDL or fix gdk-pixbuf loaders."
+            }
+        }
+    } else {
+        if ($hasGtk) {
+            return @{ Args = @("-display", "gtk"); Name = "gtk"; Note = $null }
+        }
+        if ($hasSdl) {
+            return @{ Args = @("-display", "sdl"); Name = "sdl"; Note = $null }
+        }
+    }
+
+    return @{ Args = @("-display", "default"); Name = "default"; Note = "Neither sdl nor gtk listed; using -display default." }
+}
+
 $qemu = Find-QemuAarch64
 if (-not $qemu) {
     Write-Host "qemu-system-aarch64 not found."
@@ -71,16 +148,8 @@ if (-not (Test-Path -LiteralPath $initrd)) {
     throw "Initrd not found at $initrd - run scripts/build-kernel.ps1"
 }
 
-# Prefer gtk; many Windows builds ship sdl or a default display backend.
-$displayArgs = @("-display", "gtk")
-$help = & "$qemu" -display help 2>&1 | Out-String
-if ($help -notmatch "(?i)\bgtk\b") {
-    if ($help -match "(?i)\bsdl\b") {
-        $displayArgs = @("-display", "sdl")
-    } else {
-        $displayArgs = @("-display", "default")
-    }
-}
+$display = Resolve-DisplayBackend -QemuPath $qemu -Requested $DisplayBackend
+$displayArgs = $display.Args
 
 $gpuArgs = @()
 if ($VirtioGpu) {
@@ -90,11 +159,16 @@ if ($VirtioGpu) {
 
 Write-Host "Using QEMU: $qemu"
 Write-Host "Display: $($displayArgs -join ' ') + ramfb$(if ($VirtioGpu) { ' + virtio-gpu' } else { ' (visible)' })"
+if ($display.Note) {
+    Write-Host $display.Note
+}
 Write-Host "Starting QEMU GUI (serial on this console; Ctrl+A X to exit)..."
 Write-Host "Expect serial: display: ramfb mapped 480x800 ... / ramfb smoke ok ..."
 if (-not $VirtioGpu) {
     Write-Host "Expect serial: display: no virtio-gpu device  (pass -VirtioGpu to probe)"
 }
+Write-Host "Expect window: 480x800 smoke paint (Home/Agent), not GTK placeholder text."
+Write-Host "Override host UI: -DisplayBackend sdl|gtk|default"
 
 & "$qemu" `
     -machine virt,gic-version=2 `

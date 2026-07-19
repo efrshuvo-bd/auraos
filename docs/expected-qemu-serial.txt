@@ -5,11 +5,16 @@
 #
 # GUI path (`scripts/run-qemu-gui.ps1`): same serial mux, plus `-device ramfb` and
 # a host display window (ramfb is the visible surface by default).
+# On Windows the script prefers `-display sdl` because Scoop GTK often has an empty
+# gdk-pixbuf loaders.cache (Gtk-WARNING about Adwaita SVG / pixbuf) — a host issue
+# that can leave the window on a placeholder even when ramfb smoke succeeded.
+# Override: `-DisplayBackend sdl|gtk|default`.
 # Pass `-VirtioGpu` to also add `-device virtio-gpu-device,bus=virtio-mmio-bus.1`
 # for SCRUM-29 probe logging; until GPU queues/scanout exist the window may then
 # show QEMU's "Guest has not initialized the display (yet)" placeholder.
 # Default GUI boots expect `display: no virtio-gpu device` then
 # `display: ramfb mapped…` / `display: ramfb smoke ok…`; headless skips ramfb.
+# Window should show the 480×800 smoke paint (not placeholder text) when using SDL.
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
