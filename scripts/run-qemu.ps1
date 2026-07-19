@@ -52,7 +52,7 @@ Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
 # Mux stdio so PL011 + virtconsole share the same terminal.
 # Quote the path — unquoted D:\... is parsed as a drive-scoped command.
 & "$qemu" `
-    -machine virt `
+    -machine virt,gic-version=2 `
     -cpu cortex-a57 `
     -m 512M `
     -nographic `

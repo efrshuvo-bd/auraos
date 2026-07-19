@@ -14,6 +14,12 @@ pub extern "C" fn _start() -> ! {
     }
     ipc_send(1, 0x4845_4C50);
     write("syscall: write\n");
+    // Busy-wait so CNTP can preempt mid-run (Sprint 2 smoke).
+    write("shell: spinning for preempt smoke\n");
+    for _ in 0..40_000_000u32 {
+        core::hint::spin_loop();
+    }
+    write("shell: spin done\n");
     write("shell: demo complete — ask agent on host via `cargo run -p aura-shell`\n");
     exit()
 }

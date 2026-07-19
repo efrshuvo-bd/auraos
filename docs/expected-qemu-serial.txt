@@ -1,21 +1,26 @@
 # Documented serial transcript for AuraOS kernel bring-up on QEMU virt.
-# `scripts/run-qemu.ps1` muxes PL011 UART + VirtIO console onto stdio, so you
-# see both streams in one terminal (order may interleave slightly).
+# `scripts/run-qemu.ps1` uses `-machine virt,gic-version=2` and muxes PL011 UART
+# + VirtIO console onto stdio (order may interleave slightly).
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
 # Guest SYS_READ                   → VirtIO console RX (polled; empty unless typed)
+#
+# During shell's busy-wait, CNTP may preempt several times; up to 3
+# `sched: preempt pid=…` lines are logged (further preemption is silent).
 
 AuraOS kernel online
 phase1: uart + panic + frame allocator
 phase2: heap + frame allocator ready
 vm: EL1 identity map installed (MMU on)
 phase2: identity map installed
-exception: VBAR_EL1 installed (SVC ready)
+exception: VBAR_EL1 installed (SVC+IRQ)
 virtio: console at mmio version=2 (modern)
 virtio: console TX/RX ready (RX polled; IRQ deferred)
 virtio: RX poll ok (empty)
-phase2: timer tick armed
+gic: v2 ready (CNTP PPI 30)
+timer: CNTP armed (100 Hz, IRQ preempt)
+phase2: gic + timer IRQ armed
 syscall: table ready (write/read/yield/exit/ipc)
 phase2: scheduler + syscalls + ipc ready
 userspace: loading embedded guest ELFs
@@ -35,6 +40,11 @@ sched: run shell
 shell: home + agent overlay ready
 shell: agent handshake ok (IPC)
 syscall: write
+shell: spinning for preempt smoke
+sched: preempt pid=3
+sched: preempt pid=3
+sched: preempt pid=3
+shell: spin done
 shell: demo complete — ask agent on host via `cargo run -p aura-shell`
 syscall: exit
 sched: idle

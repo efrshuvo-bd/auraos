@@ -20,10 +20,25 @@ impl TrapFrame {
     }
 }
 
-/// Result of handling a trap from EL0.
+/// Result of handling a trap/IRQ from EL0.
+///
+/// Action codes returned to the asm bridge (`return_to_kernel`):
+/// 0=Resume, 1=Yield, 2=Exit, 3=Preempt — all non-zero share one return path.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TrapAction {
     Resume,
     Yield,
     Exit,
+    Preempt,
+}
+
+impl TrapAction {
+    pub fn as_code(self) -> u64 {
+        match self {
+            TrapAction::Resume => 0,
+            TrapAction::Yield => 1,
+            TrapAction::Exit => 2,
+            TrapAction::Preempt => 3,
+        }
+    }
 }
