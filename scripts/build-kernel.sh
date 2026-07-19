@@ -13,7 +13,8 @@ echo "Building aura-guest EL0 binaries..."
 (
   cd "$GUEST_DIR"
   export CARGO_TARGET_DIR="$GUEST_TARGET"
-  unset CARGO_ENCODED_RUSTFLAGS RUSTFLAGS CARGO_TARGET_AARCH64_UNKNOWN_NONE_RUSTFLAGS || true
+  unset CARGO_ENCODED_RUSTFLAGS RUSTFLAGS || true
+  export CARGO_TARGET_AARCH64_UNKNOWN_NONE_RUSTFLAGS="-C link-arg=-T${GUEST_DIR}/user.ld -C link-arg=--no-eh-frame-hdr"
   rustup run nightly cargo build -Z build-std=core --release --target aarch64-unknown-none --bins
 )
 
@@ -32,6 +33,8 @@ echo "Building aura-kernel (aarch64-unknown-none)..."
 (
   cd "$ROOT/kernel"
   export CARGO_TARGET_DIR="$ROOT/kernel/target"
+  unset CARGO_ENCODED_RUSTFLAGS RUSTFLAGS || true
+  export CARGO_TARGET_AARCH64_UNKNOWN_NONE_RUSTFLAGS="-C link-arg=-T${ROOT}/kernel/aarch64-qemu.ld"
   cargo +nightly build -Z build-std=core,alloc --target aarch64-unknown-none --release
 )
 
