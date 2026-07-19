@@ -8,12 +8,14 @@ extern crate alloc;
 
 mod arch;
 mod board_pi5;
+mod bootinfo;
 mod console;
+mod cpio;
 mod elf;
 mod exceptions;
+mod fdt;
 mod frame;
 mod gic;
-mod guest_blobs;
 mod ipc;
 mod mem;
 mod process;
@@ -29,13 +31,23 @@ mod vm;
 use core::panic::PanicInfo;
 
 #[no_mangle]
-pub extern "C" fn kernel_main() -> ! {
+pub extern "C" fn kernel_main(fdt: usize) -> ! {
     let _board = board_pi5::BOARD;
     uart::init();
     console::println("AuraOS kernel online");
     console::println("phase1: uart + panic + frame allocator");
 
+    bootinfo::init(fdt);
+    if fdt == 0 {
+        console::println("boot: FDT pointer is null");
+    } else if bootinfo::initrd_range().is_some() {
+        console::println("boot: initrd range from FDT /chosen");
+    } else {
+        console::println("boot: FDT present but no linux,initrd-* in /chosen");
+    }
+
     mem::init_heap();
+    // Frame pool after kernel load area; QEMU places initrd near end of RAM.
     frame::init(0x4400_0000, 64 * 1024 * 1024);
     console::println("phase2: heap + frame allocator ready");
 
