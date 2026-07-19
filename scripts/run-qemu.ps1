@@ -3,10 +3,11 @@ $ErrorActionPreference = "Stop"
 $env:Path = "$env:USERPROFILE\.cargo\bin;D:\scoop\shims;$env:Path"
 
 $Root = Split-Path -Parent $PSScriptRoot
-$elf = Join-Path $Root "kernel\target\aarch64-unknown-none\release\aura-kernel"
+$kernelBin = Join-Path $Root "build\aura-kernel.bin"
+$initrd = Join-Path $Root "build\initrd.cpio"
 
-if (-not (Test-Path -LiteralPath $elf)) {
-    Write-Host "Kernel not built; running build-kernel.ps1..."
+if (-not (Test-Path -LiteralPath $kernelBin) -or -not (Test-Path -LiteralPath $initrd)) {
+    Write-Host "Kernel/initrd missing; running build-kernel.ps1..."
     & "$PSScriptRoot\build-kernel.ps1"
 }
 
@@ -46,11 +47,18 @@ if (-not $qemu) {
     exit 1
 }
 
+if (-not (Test-Path -LiteralPath $kernelBin)) {
+    throw "Kernel binary not found at $kernelBin - run scripts/build-kernel.ps1"
+}
+if (-not (Test-Path -LiteralPath $initrd)) {
+    throw "Initrd not found at $initrd - run scripts/build-kernel.ps1"
+}
+
 Write-Host "Using QEMU: $qemu"
 Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
-# VirtIO console (MMIO) for guest SYS_WRITE; UART kept for early boot.
+# Raw kernel.bin (not ELF): QEMU Linux boot path loads -initrd and passes FDT in x0.
+# Guests come from initrd cpio; VirtIO console for guest SYS_WRITE; UART for early boot.
 # Mux stdio so PL011 + virtconsole share the same terminal.
-# Quote the path — unquoted D:\... is parsed as a drive-scoped command.
 & "$qemu" `
     -machine virt,gic-version=2 `
     -cpu cortex-a57 `
@@ -62,4 +70,5 @@ Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
     -global virtio-mmio.force-legacy=false `
     -device virtio-serial-device,bus=virtio-mmio-bus.0 `
     -device virtconsole,chardev=char0 `
-    -kernel "$elf"
+    -kernel "$kernelBin" `
+    -initrd "$initrd"

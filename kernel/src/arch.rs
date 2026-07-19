@@ -10,16 +10,20 @@ struct KernelStack([u8; STACK_SIZE]);
 #[used]
 static mut KERNEL_STACK: KernelStack = KernelStack([0; STACK_SIZE]);
 
+/// QEMU `-kernel` passes the FDT pointer in `x0`. Preserve it into `kernel_main(x0)`.
 #[unsafe(naked)]
 #[no_mangle]
 #[link_section = ".text.boot"]
 pub unsafe extern "C" fn _start() -> ! {
     naked_asm!(
+        // x0 = FDT from QEMU; keep in x19 across stack setup.
+        "mov x19, x0",
         "adrp x0, {stack}",
         "add x0, x0, :lo12:{stack}",
         "mov x1, {size}",
         "add x0, x0, x1",
         "mov sp, x0",
+        "mov x0, x19",
         "b {main}",
         stack = sym KERNEL_STACK,
         size = const STACK_SIZE,

@@ -1,6 +1,7 @@
 # Documented serial transcript for AuraOS kernel bring-up on QEMU virt.
-# `scripts/run-qemu.ps1` uses `-machine virt,gic-version=2` and muxes PL011 UART
-# + VirtIO console onto stdio (order may interleave slightly).
+# `scripts/run-qemu.ps1` uses `-machine virt,gic-version=2`, raw `-kernel build/aura-kernel.bin`,
+# `-initrd build/initrd.cpio`, and muxes PL011 UART + VirtIO console onto stdio
+# (order may interleave slightly).
 #
 # Kernel early boot / sched lines → UART
 # Guest init/agent/shell writes     → VirtIO console TX (SYS_WRITE)
@@ -11,6 +12,7 @@
 
 AuraOS kernel online
 phase1: uart + panic + frame allocator
+boot: initrd range from FDT /chosen
 phase2: heap + frame allocator ready
 vm: EL1 identity map installed (MMU on)
 phase2: identity map installed
@@ -23,7 +25,7 @@ timer: CNTP armed (100 Hz, IRQ preempt)
 phase2: gic + timer IRQ armed
 syscall: table ready (write/read/yield/exit/ipc)
 phase2: scheduler + syscalls + ipc ready
-userspace: loading embedded guest ELFs
+userspace: loading guests from initrd
 userspace: init/agent/shell ready (EL0)
 phase2/3: userspace init scheduled
 AuraOS entering scheduler
