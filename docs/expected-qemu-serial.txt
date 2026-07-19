@@ -27,6 +27,7 @@
 # preempt several times; up to 3 `sched: preempt pid=…` lines are logged.
 
 AuraOS kernel online
+board: qemu-virt (pi5 research stubs present; not a hardware driver)
 phase1: uart + panic + frame allocator
 boot: initrd range from FDT /chosen
 phase2: heap + frame allocator ready

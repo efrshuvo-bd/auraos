@@ -37,6 +37,7 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
     uart::init();
     arch::enable_fp_simd();
     console::println("AuraOS kernel online");
+    console::println(board_pi5::status_line());
     console::println("phase1: uart + panic + frame allocator");
 
     bootinfo::init(fdt);

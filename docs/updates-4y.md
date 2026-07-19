@@ -34,3 +34,6 @@ A **4-year support window** is a product requirement. It drives partition layout
 ## Skeleton in-tree
 
 See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing placeholders.
+
+Host verify stub (Sprint 6): `cargo test -p aura-ota-verify` — rejects unsigned
+payloads per the `dev-signed` contract in `ota/dev-keys/README.md`.
