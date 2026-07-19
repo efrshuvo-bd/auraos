@@ -94,6 +94,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn m(channel: &str, signature: Option<&str>) -> UpdateManifest {
         UpdateManifest {
@@ -103,6 +104,12 @@ mod tests {
             payload_sha256: None,
             signature: signature.map(str::to_string),
         }
+    }
+
+    fn fixture_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../ota/fixtures")
+            .join(name)
     }
 
     #[test]
@@ -137,5 +144,21 @@ mod tests {
             verify_manifest(&m("os", Some("not-a-real-sig"))),
             Err(VerifyError::BadDevSignature)
         );
+    }
+
+    /// Repo fixture: unsigned manifest must be rejected (same contract as CLI).
+    #[test]
+    fn fixture_rejects_unsigned_os() {
+        let path = fixture_path("unsigned-os.json");
+        let manifest = load_manifest(&path).expect("load unsigned-os.json");
+        assert_eq!(verify_manifest(&manifest), Err(VerifyError::Unsigned));
+    }
+
+    /// Repo fixture: `dev-signed` manifest must be accepted (same contract as CLI).
+    #[test]
+    fn fixture_accepts_signed_os() {
+        let path = fixture_path("signed-os.json");
+        let manifest = load_manifest(&path).expect("load signed-os.json");
+        assert_eq!(verify_manifest(&manifest), Ok(()));
     }
 }
