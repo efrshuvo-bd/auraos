@@ -26,6 +26,23 @@ fn request_tool(tool_id: u64, label: &str) -> bool {
     }
 }
 
+/// Serial stand-in for the host PPM "Agent always on" surface (SCRUM-28).
+fn present_agent_ui() {
+    write("\n");
+    write("+------------ Home --------------------+\n");
+    write("|  AuraOS                              |\n");
+    write("|  Agent always on                     |\n");
+    write("|                                      |\n");
+    write("|  [ Agent ]   [ Status ]   [ Apps ]   |\n");
+    write("+--------------------------------------+\n");
+    write("+-- Agent -----------------------------\n");
+    write("| status: ready                        |\n");
+    write("| prompt: Ask anything...              |\n");
+    write("| tools: [help] [status] [services]    |\n");
+    write("+--------------------------------------\n");
+    write("shell: UI surface up (serial); host PPM in userspace/shell\n");
+}
+
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
     write("shell: home + agent overlay ready\n");
@@ -38,10 +55,15 @@ pub extern "C" fn _start() -> ! {
     }
     write("shell: agent handshake ok (IPC READY)\n");
 
+    present_agent_ui();
+
+    // UI path: "tap" [help] then [status] via Agent Core IPC (same tools as host).
+    write("shell: UI -> tool help\n");
     if !request_tool(TOOL_HELP, "shell: help ok via Agent Core\n") {
         write("shell: FAIL CLOSED — help failed\n");
         exit();
     }
+    write("shell: UI -> tool status\n");
     if !request_tool(
         TOOL_SYSTEM_STATUS,
         "shell: system_status ok via Agent Core\n",

@@ -56,9 +56,11 @@ if (-not (Test-Path -LiteralPath $initrd)) {
 
 Write-Host "Using QEMU: $qemu"
 Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
+Write-Host "Headless serial path (-nographic). For ramfb GUI window: .\scripts\run-qemu-gui.ps1"
 # Raw kernel.bin (not ELF): QEMU Linux boot path loads -initrd and passes FDT in x0.
 # Guests come from initrd cpio; VirtIO console for guest SYS_WRITE; UART for early boot.
 # Mux stdio so PL011 + virtconsole share the same terminal.
+# No -device ramfb / virtio-gpu here (CI-friendly); display::init will log skips.
 & "$qemu" `
     -machine virt,gic-version=2 `
     -cpu cortex-a57 `
