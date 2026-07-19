@@ -1,6 +1,7 @@
-//! AuraOS shared types: IPC framing, tool schemas, service names.
+//! AuraOS shared types: IPC framing, tool schemas, service names, OTA metadata.
 
 pub mod ipc;
+pub mod ota;
 pub mod tools;
 
 pub const AURA_VERSION: &str = env!("CARGO_PKG_VERSION");

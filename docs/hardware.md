@@ -38,6 +38,8 @@ Local 3B–7B-class quantized models + tool loops:
 | QEMU `virt` aarch64 | 4–8 GB guest RAM |
 | Raspberry Pi 4/5 | 8 GB for bring-up; cloud agent OK |
 
+Pi 5 bring-up checklist, QEMU gaps, and feature flags: [hardware-port-pi5.md](hardware-port-pi5.md) (Sprint 6 / SCRUM-30). Default runtime remains QEMU virt — the Pi port is research stubs only.
+
 ## Product stance
 
 Prefer SoCs with obtainable boot docs, long BSP life, and an NPU so AuraOS can promise Tier B + a **4-year** update window (see [updates-4y.md](updates-4y.md)).

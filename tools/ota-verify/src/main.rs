@@ -1,48 +1,15 @@
 //! Host-side OTA manifest verify stub (Sprint 6 / SCRUM-31).
 //!
-//! Rejects unsigned payloads. Dev signature contract is the literal string
-//! `dev-signed` — not production cryptography. See `ota/dev-keys/README.md`.
+//! Rejects unsigned payloads using shared channel/manifest types.
+//! Dev signature contract is the literal string `dev-signed` — not production
+//! cryptography. See `ota/dev-keys/README.md`.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use shared::ota::{self, UpdateManifest, VerifyError};
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
-
-const DEV_SIGNATURE: &str = "dev-signed";
-const KNOWN_CHANNELS: &[&str] = &["os", "agent", "models"];
-
-#[derive(Debug, Deserialize)]
-struct UpdateManifest {
-    channel: String,
-    version: String,
-    #[serde(default)]
-    target_slot: Option<String>,
-    #[serde(default)]
-    payload_sha256: Option<String>,
-    /// Absent, null, or empty → unsigned (must reject).
-    #[serde(default)]
-    signature: Option<String>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum VerifyError {
-    UnknownChannel(String),
-    Unsigned,
-    BadDevSignature,
-}
-
-fn verify_manifest(m: &UpdateManifest) -> Result<(), VerifyError> {
-    if !KNOWN_CHANNELS.contains(&m.channel.as_str()) {
-        return Err(VerifyError::UnknownChannel(m.channel.clone()));
-    }
-    match m.signature.as_deref().map(str::trim) {
-        None | Some("") => Err(VerifyError::Unsigned),
-        Some(DEV_SIGNATURE) => Ok(()),
-        Some(_) => Err(VerifyError::BadDevSignature),
-    }
-}
 
 fn load_manifest(path: &Path) -> Result<UpdateManifest> {
     let text = fs::read_to_string(path)
@@ -65,7 +32,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match verify_manifest(&manifest) {
+    match ota::verify_manifest(&manifest) {
         Ok(()) => {
             println!(
                 "ok: channel={} version={} slot={} (dev signature accepted)",
@@ -94,6 +61,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::ota::{verify_manifest, DEV_SIGNATURE, VerifyError};
     use std::path::PathBuf;
 
     fn m(channel: &str, signature: Option<&str>) -> UpdateManifest {
@@ -146,19 +114,39 @@ mod tests {
         );
     }
 
-    /// Repo fixture: unsigned manifest must be rejected (same contract as CLI).
     #[test]
     fn fixture_rejects_unsigned_os() {
-        let path = fixture_path("unsigned-os.json");
-        let manifest = load_manifest(&path).expect("load unsigned-os.json");
+        let manifest = load_manifest(&fixture_path("unsigned-os.json")).expect("load");
         assert_eq!(verify_manifest(&manifest), Err(VerifyError::Unsigned));
     }
 
-    /// Repo fixture: `dev-signed` manifest must be accepted (same contract as CLI).
     #[test]
     fn fixture_accepts_signed_os() {
-        let path = fixture_path("signed-os.json");
-        let manifest = load_manifest(&path).expect("load signed-os.json");
+        let manifest = load_manifest(&fixture_path("signed-os.json")).expect("load");
+        assert_eq!(verify_manifest(&manifest), Ok(()));
+    }
+
+    #[test]
+    fn fixture_rejects_unsigned_agent() {
+        let manifest = load_manifest(&fixture_path("unsigned-agent.json")).expect("load");
+        assert_eq!(verify_manifest(&manifest), Err(VerifyError::Unsigned));
+    }
+
+    #[test]
+    fn fixture_accepts_signed_agent() {
+        let manifest = load_manifest(&fixture_path("signed-agent.json")).expect("load");
+        assert_eq!(verify_manifest(&manifest), Ok(()));
+    }
+
+    #[test]
+    fn fixture_rejects_unsigned_models() {
+        let manifest = load_manifest(&fixture_path("unsigned-models.json")).expect("load");
+        assert_eq!(verify_manifest(&manifest), Err(VerifyError::Unsigned));
+    }
+
+    #[test]
+    fn fixture_accepts_signed_models() {
+        let manifest = load_manifest(&fixture_path("signed-models.json")).expect("load");
         assert_eq!(verify_manifest(&manifest), Ok(()));
     }
 }

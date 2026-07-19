@@ -35,5 +35,20 @@ A **4-year support window** is a product requirement. It drives partition layout
 
 See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing placeholders.
 
-Host verify stub (Sprint 6): `cargo test -p aura-ota-verify` — rejects unsigned
-payloads per the `dev-signed` contract in `ota/dev-keys/README.md`.
+| Piece | Status |
+|-------|--------|
+| Channels `os` / `agent` / `models` | In `ota/channels.json` + `shared::ota::Channel` |
+| A/B slot metadata | `ota/slots.json` + `shared::ota::{SlotId, AbSlots}` |
+| Host reject-unsigned | `aura-ota-verify` (uses `shared::ota::verify_manifest`) |
+| Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` |
+| Rollback story | `ota/apply_update.md` |
+| Kernel on-device apply | **Not applied** — boot log `ota: A/B not applied` |
+| VirtIO-blk for slots | Probe stub only (`virtio: no blk device` / stub ok) |
+| Production crypto / verified boot | **Deferred** — replace `dev-signed` with HSM-backed signatures |
+
+Host verify (Sprint 6): `.\scripts\verify-ota.ps1` or `cargo test -p aura-ota-verify` —
+rejects unsigned payloads per the `dev-signed` contract in `ota/dev-keys/README.md`.
+
+**Production cryptography stays deferred:** the stub must never be mistaken for
+device trust. Shipping devices need verified boot + real signatures (ed25519 or
+equivalent) before any OTA write to an inactive slot.

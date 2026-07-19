@@ -12,8 +12,10 @@ hardens the in-repo skeleton; on-device apply is still deferred.
 | `slots.json` | A/B slot state + rollback flags |
 | `apply_update.md` | Operator notes (inactive slot → reboot → rollback) |
 | `dev-keys/` | Dev trust-anchor placeholders (**not** production secrets) |
-| `fixtures/` | Sample manifests for the host verify stub |
-| `../tools/ota-verify` | Host tool + tests: **reject unsigned** payloads |
+| `fixtures/` | Sample manifests for all channels (signed + unsigned) |
+| `../shared/src/ota.rs` | Channel / slot / manifest types + `verify_manifest` |
+| `../tools/ota-verify` | Host CLI wrapping shared verify (**reject unsigned**) |
+| `../kernel/src/ota.rs` | Boot log only: `ota: A/B not applied` |
 
 ## Channels
 
@@ -24,7 +26,7 @@ hardens the in-repo skeleton; on-device apply is still deferred.
 | `models` | Optional on-device packs (Tier B) | Signed; optional; may use dedicated volume |
 
 All channels require signatures in the verify stub. Production replaces the
-`dev-signed` token with real cryptography under verified boot.
+`dev-signed` token with real cryptography under verified boot (**deferred**).
 
 ## A/B + rollback (design)
 
@@ -35,15 +37,26 @@ All channels require signatures in the verify stub. Production replaces the
 5. Success → `successful_boot=true`, flip `active`.
 6. Failure → bootloader rolls back (`rollback_on_failure` in `slots.json`).
 
+Details: [apply_update.md](apply_update.md).
+
 ## Host verify (Sprint 6)
 
 ```powershell
+.\scripts\verify-ota.ps1
+# or:
 cargo test -p aura-ota-verify
 cargo run -p aura-ota-verify -- ota/fixtures/unsigned-os.json   # expect reject
-cargo run -p aura-ota-verify -- ota/fixtures/signed-os.json     # expect ok
+cargo run -p aura-ota-verify -- ota/fixtures/signed-agent.json  # expect ok
 ```
+
+Fixtures cover `os`, `agent`, and `models` (signed + unsigned each).
 
 Dev signature contract: JSON field `signature` must equal `dev-signed`.
 Anything else (missing / empty / other string) is rejected.
 
-Production devices must replace dev keys with HSM-backed keys and enforce verified boot.
+## On-device / storage (honest skeleton)
+
+- Kernel prints `ota: A/B not applied` — no fake success.
+- VirtIO-blk is **probe-only** until a real block driver exists for slot images.
+- **Production crypto stays deferred** — HSM-backed keys + verified boot required
+  before any device trusts an OTA write.

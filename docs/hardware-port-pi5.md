@@ -3,7 +3,8 @@
 Phase 5 / Sprint 6 bring-up target for AuraOS (Tier C research board → Tier A cloud agent).
 
 Jira: [SCRUM-30](https://auramislab.atlassian.net/browse/SCRUM-30) under epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12).  
-In-tree board notes: `kernel/src/board_pi5.rs` (constants + gaps only — **not** a working Pi 5 driver).
+In-tree board notes: `kernel/src/board_pi5.rs` (constants + feature flags only — **not** a working Pi 5 driver).  
+Linked from the [Development Plan](https://auramislab.atlassian.net/wiki/spaces/AuraOS/pages/295074) and [`docs/hardware.md`](hardware.md).
 
 ## Why Pi 5
 
@@ -43,6 +44,25 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 | Storage for A/B slots (`ota/slots.json` semantics) | Open | Needs SD/eMMC or VirtIO-blk equivalent — see OTA docs |
 | Network for cloud Agent Core + OTA | Later | Not required for first serial milestone |
 
+## Port matrix (QEMU virt vs Pi 5)
+
+Clearer view of what is portable vs board-specific. **Do not** treat any Pi column as “done on silicon.”
+
+| Subsystem | QEMU `virt` today | Pi 5 research | Feature flag (`board_pi5::features`) | Next driver task |
+|-----------|-------------------|---------------|--------------------------------------|------------------|
+| Early console | PL011 `0x0900_0000` | Debug UART from DT | `UART_EARLY_CONSOLE` | Map DT UART → `uart::init`; keep QEMU path default |
+| Kernel entry | Raw `-kernel` @ `0x40080000`, FDT in `x0` | Firmware `kernel*.img` + DTB | — | Package image for Pi boot chain; verify EL |
+| Memory | Hardcoded pool `0x4400_0000` | `/memory` in DT | `DT_MEMORY_MAP` | DT walker → `frame::init` |
+| Interrupts | GICv2 virt defaults | DT GIC v2/v3 | `GIC_FROM_DT` | Re-probe distributor/CPU/redistributor |
+| Timer | CNTP PPI 30 | Architected timer; IRQ routing differs | (with GIC) | Confirm PPI/SPI after GIC |
+| Display | ramfb / VirtIO-GPU probe | HDMI / VC4 later | — | Out of first serial milestone |
+| Storage / A/B | initrd only; VirtIO-blk **probe stub** | SD/eMMC partitions | `STORAGE_AB_SLOTS` | Block driver + slot layout; see `ota/` |
+| OTA apply | Host `aura-ota-verify`; kernel logs “not applied” | Same metadata | `OTA_ON_DEVICE_APPLY` | On-device verify + inactive-slot write |
+
+Boot status line on QEMU today:  
+`board: qemu-virt (pi5 research stubs present; not a hardware driver)`  
+(`board_pi5::status_line()` — always QEMU virt until a dedicated Pi image exists.)
+
 ## Gaps vs QEMU `virt` (must not paper over)
 
 | Area | QEMU `virt` (today) | Pi 5 (target) |
@@ -53,10 +73,10 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 | Interrupts | GICv2 distributor/CPU iface at virt defaults | DT-described GIC; verify version |
 | Timer | CNTP PPI 30 via virt GIC | Architected timer still OK in principle; IRQ routing differs |
 | Display | `ramfb` / VirtIO-GPU probe (Sprint 5) | HDMI / VC4 path — separate from QEMU smoke UI |
-| Storage | initrd cpio only | SD/eMMC + A/B partitions for OTA |
+| Storage | initrd cpio only (+ VirtIO-blk probe log) | SD/eMMC + A/B partitions for OTA |
 | Guests | `-initrd` cpio newc | Same userspace possible once storage/console exist |
 
-**Honesty rule:** `board_pi5` and this doc describe research + compile-time identity. They do **not** enable a fake “runs on Pi 5” code path. Default build remains QEMU virt.
+**Honesty rule:** `board_pi5` and this doc describe research + compile-time identity. They do **not** enable a fake “runs on Pi 5” code path. Default build remains QEMU virt. No claim that Pi UART/GIC works on real silicon.
 
 ## Minimum for “AuraOS on Pi 5” milestone
 
@@ -74,3 +94,4 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 
 - Full GPU compositor, camera, or vendor NPU acceleration (Tier B needs a phone SoC class device)
 - Claiming production verified boot on Pi without HSM-backed keys
+- Fake hardware drivers that pretend UART/GIC/storage work on Pi 5

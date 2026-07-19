@@ -25,3 +25,13 @@ Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 ## Channels
 
 See `channels.json` and `README.md`. `models` is optional and must still be signed.
+Typed in code as `shared::ota::Channel` (`os` | `agent` | `models`).
+
+## Production crypto (deferred)
+
+The host stub accepts only the literal token `dev-signed`. That is **not** a
+shipping trust model. Before any on-device apply:
+
+1. Replace dev tokens with HSM-backed signatures under verified boot.
+2. Keep rejecting unsigned / bad signatures before any inactive-slot write.
+3. Align key rotation and EOS with [docs/updates-4y.md](../docs/updates-4y.md).

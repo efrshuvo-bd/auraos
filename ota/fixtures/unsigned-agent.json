@@ -1,0 +1,7 @@
+{
+  "channel": "agent",
+  "version": "0.1.1",
+  "target_slot": "B",
+  "payload_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "signature": null
+}
