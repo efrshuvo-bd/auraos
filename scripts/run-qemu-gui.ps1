@@ -12,7 +12,7 @@
 # Windows / Scoop QEMU host note:
 #   Scoop's GTK build often ships an empty gdk-pixbuf loaders.cache (and may warn:
 #   "Could not load a pixbuf from .../Adwaita/assets/...svg"). That is a *host*
-#   packaging issue — the guest ramfb path can be fine while the GTK window stays
+#   packaging issue - the guest ramfb path can be fine while the GTK window stays
 #   stuck on QEMU's placeholder. Prefer SDL on Windows; override with -DisplayBackend.
 #
 # Serial path (unchanged from run-qemu.ps1):
@@ -110,14 +110,14 @@ function Resolve-DisplayBackend {
             return @{
                 Args = @("-display", "sdl")
                 Name = "sdl"
-                Note = "Windows default: SDL (Scoop GTK often broken — Gtk-WARNING about Adwaita SVG / pixbuf loaders is a host packaging issue, not guest ramfb)."
+                Note = 'Windows default: SDL (Scoop GTK often broken - Gtk-WARNING about Adwaita SVG / pixbuf loaders is a host packaging issue, not guest ramfb).'
             }
         }
         if ($hasGtk) {
             return @{
                 Args = @("-display", "gtk")
                 Name = "gtk"
-                Note = "SDL unavailable; using GTK. If you see Gtk-WARNING about pixbuf/mime or a stuck placeholder, install a QEMU build with SDL or fix gdk-pixbuf loaders."
+                Note = 'SDL unavailable; using GTK. If you see Gtk-WARNING about pixbuf/mime or a stuck placeholder, install a QEMU build with SDL or fix gdk-pixbuf loaders.'
             }
         }
     } else {
@@ -129,7 +129,7 @@ function Resolve-DisplayBackend {
         }
     }
 
-    return @{ Args = @("-display", "default"); Name = "default"; Note = "Neither sdl nor gtk listed; using -display default." }
+    return @{ Args = @("-display", "default"); Name = "default"; Note = 'Neither sdl nor gtk listed; using -display default.' }
 }
 
 $qemu = Find-QemuAarch64
