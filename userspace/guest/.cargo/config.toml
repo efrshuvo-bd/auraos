@@ -1,8 +1,8 @@
-# Guest EL0 binaries link at 0x400000 via user.ld (absolute path — link cwd varies).
-
+# Guest EL0 binaries link at 0x400000 via user.ld.
+# Portable defaults for Linux/CI. On Windows WDAC, run scripts/fix-linker.ps1.
 [target.aarch64-unknown-none]
-linker = "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\bin\\ld.lld.exe"
+linker = "rust-lld"
 rustflags = [
-  "-C", "link-arg=-TD:/WorkSpace/SysemDev/auraos/userspace/guest/user.ld",
+  "-C", "link-arg=-Tuser.ld",
   "-C", "link-arg=--no-eh-frame-hdr",
 ]

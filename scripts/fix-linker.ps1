@@ -1,12 +1,9 @@
 # Prefer a WDAC-allowed linker for aarch64-unknown-none (VS LLVM ld.lld).
 # Copied rust-lld / tools/lld.exe is often blocked (os error 4551).
+# Updates kernel/.cargo/config.toml and userspace/guest/.cargo/config.toml.
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
-$configDir = Join-Path $Root "kernel\.cargo"
-New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-
-$ldScript = (Join-Path $Root "kernel\aarch64-qemu.ld") -replace '\\', '\\'
 
 $vsLld = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\bin\ld.lld.exe"
 $mingwRoots = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Directory -ErrorAction SilentlyContinue |
@@ -41,15 +38,34 @@ if (-not $linker) {
 }
 
 $linkerEscaped = $linker -replace '\\', '\\'
-$config = @"
+
+function Write-Aarch64Config {
+    param(
+        [string]$ConfigDir,
+        [string[]]$Rustflags
+    )
+    New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+    $flags = ($Rustflags | ForEach-Object { "`"$_`"" }) -join ", "
+    $config = @"
 [target.aarch64-unknown-none]
 linker = "$linkerEscaped"
-rustflags = ["-C", "link-arg=-T$ldScript"]
+rustflags = [$flags]
 "@
+    $configPath = Join-Path $ConfigDir "config.toml"
+    Set-Content -Path $configPath -Value $config -Encoding UTF8
+    Write-Host "Updated $configPath"
+}
 
-$configPath = Join-Path $configDir "config.toml"
-Set-Content -Path $configPath -Value $config -Encoding UTF8
-Write-Host "Updated $configPath"
+$kernelLd = ((Join-Path $Root "kernel\aarch64-qemu.ld") -replace '\\', '\\')
+Write-Aarch64Config -ConfigDir (Join-Path $Root "kernel\.cargo") -Rustflags @(
+    "-C", "link-arg=-T$kernelLd"
+)
+
+$guestLd = ((Join-Path $Root "userspace\guest\user.ld") -replace '\\', '\\')
+Write-Aarch64Config -ConfigDir (Join-Path $Root "userspace\guest\.cargo") -Rustflags @(
+    "-C", "link-arg=-T$guestLd",
+    "-C", "link-arg=--no-eh-frame-hdr"
+)
 
 # Do not put aarch64 linker flags in the workspace .cargo/config.toml —
 # guest EL0 builds inherit that file and must use userspace/guest/user.ld.

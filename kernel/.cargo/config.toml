@@ -1,3 +1,5 @@
-﻿[target.aarch64-unknown-none]
-linker = "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\bin\\ld.lld.exe"
-rustflags = ["-C", "link-arg=-TD:\\WorkSpace\\SysemDev\\auraos\\kernel\\aarch64-qemu.ld"]
+﻿# Portable defaults for Linux/CI. On Windows WDAC, run scripts/fix-linker.ps1
+# to point at VS LLVM ld.lld (absolute paths).
+[target.aarch64-unknown-none]
+linker = "rust-lld"
+rustflags = ["-C", "link-arg=-Taarch64-qemu.ld"]

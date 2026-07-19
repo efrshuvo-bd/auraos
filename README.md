@@ -33,9 +33,11 @@ cargo run -p aura-shell
 
 Requires [QEMU](https://www.qemu.org/) with `qemu-system-aarch64` on `PATH` (or Scoop’s QEMU on `D:\scoop\shims`).
 
-Build embeds minimal EL0 guests from `userspace/guest` (init / agent / shell). Serial should show MMU on, SVC ready, then real EL0 processes through `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)).
+Guests from `userspace/guest` are packed into `build/initrd.cpio` (not embedded in the kernel). QEMU uses raw `build/aura-kernel.bin` + `-initrd`. Serial should reach `sched: idle` (see [docs/expected-qemu-serial.txt](docs/expected-qemu-serial.txt)).
 
-**Windows note:** WDAC often blocks rustup’s `rust-lld` (os error 4551). Prefer Visual Studio’s `ld.lld` via `.\scripts\fix-linker.ps1` (updates both `.cargo/config.toml` and `kernel/.cargo/config.toml`). Copied `tools\lld.exe` is frequently blocked too.
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) builds the host workspace and the aarch64 kernel/initrd on every PR to `devel` / `master`.
+
+**Windows note:** WDAC often blocks rustup’s `rust-lld` (os error 4551). Prefer Visual Studio’s `ld.lld` via `.\scripts\fix-linker.ps1` (updates `kernel/.cargo/config.toml` and `userspace/guest/.cargo/config.toml`). Copied `tools\lld.exe` is frequently blocked too.
 
 **QEMU note:** If `winget`’s QEMU package is tools-only (no `qemu-system-*`), install a full build with Scoop on D: when C: is tight: `$env:SCOOP='D:\scoop'; scoop install qemu`.
 
