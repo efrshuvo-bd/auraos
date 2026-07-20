@@ -39,25 +39,30 @@ See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing 
 |-------|--------|
 | Channels `os` / `agent` / `models` | In `ota/channels.json` + `shared::ota::Channel` |
 | A/B slot metadata | `ota/slots.json` + `shared::ota::{SlotId, AbSlots}` |
-| Host reject-unsigned | `aura-ota-verify` (uses `shared::ota::verify_manifest`) |
-| Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` |
+| Host reject-unsigned | `aura-ota-verify` (`shared::ota::verify_manifest`) |
+| Host trust paths | Legacy `dev-signed` **or** `sha256-dev:<hex>` digest (dev salt; not HSM) |
+| Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` + `signed-sha256-dev-os.json` |
 | Rollback story | `ota/apply_update.md` |
-| Kernel on-device apply | **Stub** — logs would-switch A↔B + refuses unsigned; still `A/B not applied` |
-| VirtIO-blk for slots | QEMU read path for sector 0 (`build/ab-slots.img`, `prepare-ab-disk.ps1`) |
-| Production crypto / verified boot | **Deferred** — replace `dev-signed` with HSM-backed signatures |
+| Kernel on-device apply | Sprint 8: refuse unsigned, then VirtIO-blk inactive-slot write + active flip |
+| VirtIO-blk for slots | QEMU read **and write** (`build/ab-slots.img`, `prepare-ab-disk.ps1`) |
+| Production crypto / verified boot | **Roadmap** — replace digests/dev tokens with HSM-backed ed25519 under VB |
 
-### QEMU A/B disk layout (SCRUM-35)
+### QEMU A/B disk layout (SCRUM-35 / SCRUM-40)
 
 | Item | Value |
 |------|--------|
 | Image | `build/ab-slots.img` via `.\scripts\prepare-ab-disk.ps1` |
 | QEMU flags | `-drive file=…,if=none,format=raw,id=abdisk` + `-device virtio-blk-device,drive=abdisk,bus=virtio-mmio-bus.2` |
-| Sector 0 | Magic `AURAAB`, byte 8 = active slot `'A'`/`'B'` |
-| Slot switch | Kernel OTA apply stub only (no write / no reboot flip yet) |
+| Sector 0 | Magic `AURAAB`, byte 8 = active slot `'A'`/`'B'` (flipped on successful apply) |
+| Sector 1 | Inactive-slot marker `INACTV` + payload stub (written on apply) |
+| Slot switch | Kernel writes inactive sector + flips active when trust gate passes |
 
-Host verify (Sprint 6): `.\scripts\verify-ota.ps1` or `cargo test -p aura-ota-verify` —
-rejects unsigned payloads per the `dev-signed` contract in `ota/dev-keys/README.md`.
+Host verify: `.\scripts\verify-ota.ps1` or `cargo test -p aura-ota-verify` —
+rejects unsigned; accepts `dev-signed` and `sha256-dev:` fixtures.
 
-**Production cryptography stays deferred:** the stub must never be mistaken for
-device trust. Shipping devices need verified boot + real signatures (ed25519 or
-equivalent) before any OTA write to an inactive slot.
+### Verified-boot roadmap (honest)
+
+1. Keep fail-closed reject of unsigned before any inactive-slot write (done).
+2. Host digest path (`sha256-dev:`) proves accept/reject beyond a literal token (Sprint 8).
+3. **Next:** ed25519 signatures with rotated keys (blocked on some WDAC hosts for crate build scripts — land when CI allows).
+4. **Shipping:** HSM-backed keys + verified boot chain (bootloader → kernel → system) before trusting OTA on silicon.

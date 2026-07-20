@@ -1,9 +1,11 @@
-# Create a tiny raw disk image for VirtIO-blk A/B slot experimentation (SCRUM-35).
+# Create a tiny raw disk image for VirtIO-blk A/B slot experimentation (SCRUM-35/40).
 #
-# Layout (sector 0 = 512 bytes):
-#   [0..6)  = "AURAAB"
-#   [8]     = active slot ASCII 'A' or 'B'
-#   rest    = zero
+# Layout:
+#   Sector 0 (512 bytes):
+#     [0..6)  = "AURAAB"
+#     [8]     = active slot ASCII 'A' or 'B'
+#     rest    = zero
+#   Sector 1+: reserved for inactive-slot payload (kernel writes "INACTV" marker)
 #
 # Usage:
 #   .\scripts\prepare-ab-disk.ps1
@@ -27,8 +29,8 @@ if (-not (Test-Path -LiteralPath $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
 }
 
-if ($SizeBytes -lt 512) {
-    throw "SizeBytes must be at least 512"
+if ($SizeBytes -lt 1024) {
+    throw "SizeBytes must be at least 1024 (header + inactive sector)"
 }
 
 $bytes = New-Object byte[] $SizeBytes

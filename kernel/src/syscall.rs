@@ -6,6 +6,7 @@ use crate::process;
 use crate::sched;
 use crate::trap::TrapFrame;
 use crate::uart;
+use crate::userspace;
 use crate::virtio;
 
 pub const SYS_WRITE: u64 = 1;
@@ -14,13 +15,15 @@ pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
 pub const SYS_READ: u64 = 6;
-/// Non-blocking waitpid (a0=pid or 0=any, a1=unused). Returns status or -1.
+/// Waitpid: a0 = pid (0 or -1 = any). Returns packed `(pid<<32)|status` or -1.
 pub const SYS_WAITPID: u64 = 7;
+/// Init-only spawn from initrd: a0 = role (1=agent, 2=shell). Returns pid or -1.
+pub const SYS_SPAWN: u64 = 8;
 
 const USER_VA_MAX: u64 = 0x0000_0000_0080_0000;
 
 pub fn init() {
-    console::println("syscall: table ready (write/read/yield/exit/ipc/waitpid)");
+    console::println("syscall: table ready (write/read/yield/exit/ipc/waitpid/spawn)");
 }
 
 /// Trap-based syscall entry (x8=nr, args in x0..).
@@ -48,6 +51,7 @@ pub fn dispatch_trap(num: u64, tf: &mut TrapFrame) -> i64 {
         }
         SYS_IPC_RECV => ipc::recv(a0 as u32) as i64,
         SYS_WAITPID => sys_waitpid(a0),
+        SYS_SPAWN => userspace::spawn_from_initrd(a0),
         _ => {
             console::println("syscall: unknown");
             -1
@@ -55,11 +59,15 @@ pub fn dispatch_trap(num: u64, tf: &mut TrapFrame) -> i64 {
     }
 }
 
-/// Non-blocking: returns exit status (>=0) of a reaped child, or -1 if none ready.
+/// Non-blocking waitpid. Success packs reaped pid (high 32) and status (low 32).
 fn sys_waitpid(pid: u64) -> i64 {
     let waiter = process::current_pid();
-    match process::waitpid_noblock(waiter, pid as u32) {
-        Some((_reaped_pid, status)) => status as i64,
+    // Accept 0 or -1 (all-bits-set) as wait-any (SCRUM-39).
+    let target = pid as u32;
+    match process::waitpid_noblock(waiter, target) {
+        Some((reaped_pid, status)) => {
+            ((reaped_pid as i64) << 32) | ((status as u32) as i64)
+        }
         None => -1,
     }
 }

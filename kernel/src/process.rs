@@ -75,30 +75,35 @@ pub fn init() {
 }
 
 pub fn spawn(name: &'static str, image: &[u8]) -> bool {
+    spawn_returning_pid(name, image).is_some()
+}
+
+/// Spawn a process and return its PID (Sprint 8 / SCRUM-39).
+pub fn spawn_returning_pid(name: &'static str, image: &[u8]) -> Option<u32> {
     let idx = match find_slot() {
         Some(i) => i,
         None => {
             console::println("process: table full");
-            return false;
+            return None;
         }
     };
     let ttbr0 = match vm::create_address_space() {
         Some(t) => t,
         None => {
             console::println("process: ttbr0 alloc failed");
-            return false;
+            return None;
         }
     };
     let loaded = match elf::load(ttbr0, image) {
         Some(l) => l,
         None => {
             console::println("process: elf load failed");
-            return false;
+            return None;
         }
     };
     if !map_user_stack(ttbr0) {
         console::println("process: stack map failed");
-        return false;
+        return None;
     }
 
     let pid = NEXT_PID.fetch_add(1, Ordering::SeqCst);
@@ -122,23 +127,24 @@ pub fn spawn(name: &'static str, image: &[u8]) -> bool {
     if idx >= used {
         SLOT_COUNT.store(idx + 1, Ordering::SeqCst);
     }
-    true
+    Some(pid)
 }
 
-/// Non-blocking wait for an exited process (Sprint 7 / SCRUM-37).
+/// Non-blocking wait for an exited process (Sprint 7/8).
 ///
-/// - `pid == 0`: first unreaped exited process other than the caller
-/// - `pid > 0`: that pid if exited and unreaped
+/// - `pid == 0` or `pid == u32::MAX` (`-1` as u32): first unreaped exited peer
+/// - `pid > 0` (and not `MAX`): that pid if exited and unreaped
 ///
 /// Returns `Some((reaped_pid, status))`, or `None` if nothing ready (WNOHANG).
 pub fn waitpid_noblock(waiter_pid: u32, pid: u32) -> Option<(u32, i32)> {
+    let wait_any = pid == 0 || pid == u32::MAX;
     unsafe {
         for i in 0..SLOT_COUNT.load(Ordering::Relaxed).min(MAX_PROCS) {
             let p = &mut PROCS[i];
             if p.state != State::Exited || p.reaped || p.pid == 0 || p.pid == waiter_pid {
                 continue;
             }
-            if pid != 0 && p.pid != pid {
+            if !wait_any && p.pid != pid {
                 continue;
             }
             p.reaped = true;
@@ -154,6 +160,16 @@ pub fn current_pid() -> u32 {
         unsafe { PROCS[idx].pid }
     } else {
         0
+    }
+}
+
+/// Name of the currently running process ("" if none).
+pub fn current_name() -> &'static str {
+    let idx = CURRENT.load(Ordering::Relaxed);
+    if idx < MAX_PROCS {
+        unsafe { PROCS[idx].name }
+    } else {
+        ""
     }
 }
 

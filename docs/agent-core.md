@@ -41,6 +41,10 @@ Guest protocol (Sprint 4):
 - `guest-init` waits for READY; if missing, prints `FAIL CLOSED` and exits without treating the session as healthy.
 - `guest-shell` also refuses a normal session without READY / successful `help` + `system_status`.
 
-Sprint 7 adds a thin non-blocking `SYS_WAITPID` (guest `waitpid_noblock`). Kernel
-still loads init/agent/shell from initrd; init exercises waitpid and keeps
-READY-based fail-closed. Full init-owned spawn of agent/shell remains deferred.
+Sprint 7 added non-blocking `SYS_WAITPID`. Sprint 8 (SCRUM-39) deepens it:
+
+- Packed return `(reaped_pid << 32) | status`
+- Wait-any via pid `0` or `-1` (`WAIT_ANY`)
+- Guest blocking helper (`waitpid` yields until ready)
+- **Init-owned spawn:** kernel boots only `guest-init`; init calls `SYS_SPAWN`
+  for agent then shell from the same initrd (fail-closed without READY)

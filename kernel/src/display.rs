@@ -1,9 +1,12 @@
-//! Display foundations: VirtIO-GPU probe + QEMU ramfb smoke test.
+//! Display foundations: VirtIO-GPU control queue + QEMU ramfb smoke test.
 //!
 //! Sprint 5 (SCRUM-29): scan VirtIO-MMIO for GPU (device id 16), and when QEMU
 //! exposes `etc/ramfb` via fw_cfg, map a 480×800 XRGB8888 surface, solid-fill,
 //! and draw a few text glyphs (matches host `userspace/shell` visual contract).
-//! Smoke labels use an 8×8 bitmap font painted at 2× scale (16×16 on screen).
+//!
+//! Sprint 8 (SCRUM-42): when a VirtIO-GPU device is present, negotiate and arm
+//! the **control queue** (beyond probe-only). Resource create / SET_SCANOUT /
+//! flush are still deferred — **ramfb remains the visible fallback**.
 //!
 //! Ramfb is activated only by a fw_cfg **DMA write** of `RAMFBCfg` to `etc/ramfb`.
 //! Byte stores to the fw_cfg DATA register are ignored (QEMU ≥ 2.4); without DMA
@@ -76,7 +79,15 @@ fn probe_virtio_gpu() {
                 2 => "2 (modern)",
                 _ => "?",
             });
-            console::println(" (probe only; queues deferred)");
+            console::println("");
+            match virtio::init_gpu_control_queue() {
+                Ok(()) => console::println(
+                    "display: virtio-gpu control queue ready (scanout deferred; ramfb fallback)",
+                ),
+                Err(()) => console::println(
+                    "display: virtio-gpu queue setup failed (ramfb remains fallback)",
+                ),
+            }
         }
         None => console::println("display: no virtio-gpu device"),
     }

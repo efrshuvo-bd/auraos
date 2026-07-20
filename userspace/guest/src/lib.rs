@@ -10,8 +10,15 @@ pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
 pub const SYS_READ: u64 = 6;
-/// Non-blocking waitpid (pid=0 → any exited peer). Returns status or -1.
+/// Waitpid: pid 0 or `WAIT_ANY` (-1). Packed return `(pid<<32)|status`.
 pub const SYS_WAITPID: u64 = 7;
+/// Init-only spawn from initrd (1=agent, 2=shell).
+pub const SYS_SPAWN: u64 = 8;
+
+/// Wait-any pid (`-1` as u32), Unix-style.
+pub const WAIT_ANY: u32 = u32::MAX;
+pub const SPAWN_AGENT: u64 = 1;
+pub const SPAWN_SHELL: u64 = 2;
 
 #[inline(always)]
 pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64 {
@@ -70,14 +77,36 @@ pub fn exit_with(status: i32) -> ! {
     loop {}
 }
 
-/// Non-blocking waitpid. `pid == 0` waits for any exited peer process.
-/// Returns `Some(status)` if a process was reaped, `None` if none ready.
-pub fn waitpid_noblock(pid: u32) -> Option<i32> {
+/// Non-blocking waitpid. `pid == 0` or [`WAIT_ANY`] waits for any exited peer.
+/// Returns `Some((reaped_pid, status))` if a process was reaped.
+pub fn waitpid_noblock(pid: u32) -> Option<(u32, i32)> {
     let n = unsafe { syscall3(SYS_WAITPID, pid as u64, 0, 0) };
     if n < 0 {
         None
     } else {
-        Some(n as i32)
+        let reaped = (n >> 32) as u32;
+        let status = n as i32;
+        Some((reaped, status))
+    }
+}
+
+/// Blocking wait (cooperative): yield until a matching exited peer is reaped.
+pub fn waitpid(pid: u32) -> (u32, i32) {
+    loop {
+        if let Some(r) = waitpid_noblock(pid) {
+            return r;
+        }
+        yield_now();
+    }
+}
+
+/// Init-only: spawn agent (1) or shell (2) from initrd. Returns new pid.
+pub fn spawn(role: u64) -> Option<u32> {
+    let n = unsafe { syscall3(SYS_SPAWN, role, 0, 0) };
+    if n < 0 {
+        None
+    } else {
+        Some(n as u32)
     }
 }
 
