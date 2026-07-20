@@ -1,8 +1,10 @@
-//! OTA / boot trust backends (Sprint 9 / SCRUM-44).
+//! OTA / boot trust backends (Sprint 9–10 / SCRUM-44 / SCRUM-50).
 //!
 //! Software ed25519 verify first; HSM remains a deferred backend shape so callers
-//! can switch without rewriting verify dispatch. This is **not** production key
-//! custody — see `docs/updates-4y.md` and `ota/dev-keys/README.md`.
+//! can switch without rewriting verify dispatch. Pass any `impl TrustBackend` into
+//! `shared::ota::verify_manifest_with` — production swap is a backend swap, not a
+//! caller rewrite. This is **not** production key custody — see
+//! `docs/updates-4y.md` and `ota/dev-keys/README.md`.
 
 use ed25519_compact::{PublicKey, Signature};
 
@@ -15,7 +17,32 @@ pub enum TrustBackendKind {
     HsmDeferred,
 }
 
+impl TrustBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TrustBackendKind::SoftSoftware => "soft-software",
+            TrustBackendKind::HsmDeferred => "hsm-deferred",
+        }
+    }
+
+    /// True only when verify can succeed today (soft path).
+    pub fn is_implemented(self) -> bool {
+        matches!(self, TrustBackendKind::SoftSoftware)
+    }
+
+    /// Production shipping still requires a real HSM backend — soft is never "prod ready".
+    pub fn is_production_ready(self) -> bool {
+        false
+    }
+}
+
 /// Pluggable verify surface for host (and future on-device) trust checks.
+///
+/// # Production swap (SCRUM-50)
+///
+/// 1. Implement `TrustBackend` for a real HSM (PKCS#11 / cloud HSM / TEE).
+/// 2. Pass `&YourHsm` into `verify_manifest_with` (or replace `default_host_backend`).
+/// 3. Keep `HsmDeferred` for fail-closed demos until that impl exists.
 pub trait TrustBackend {
     fn kind(&self) -> TrustBackendKind;
 
@@ -57,9 +84,22 @@ impl TrustBackend for HsmDeferred {
     }
 }
 
-/// Default host backend for Sprint 9.
+/// Default host backend for Sprint 9–10 demos (soft software; not HSM).
 pub fn default_host_backend() -> SoftEd25519 {
     SoftEd25519
+}
+
+/// Policy helper: prefer HSM when requested, else soft software.
+///
+/// When `prefer_hsm` is true, returns [`HsmDeferred`] (fail-closed until a real
+/// HSM `TrustBackend` exists). Callers that need live verify must keep using soft
+/// or supply their own backend — this helper never pretends HSM works.
+pub fn select_host_backend_kind(prefer_hsm: bool) -> TrustBackendKind {
+    if prefer_hsm {
+        TrustBackendKind::HsmDeferred
+    } else {
+        TrustBackendKind::SoftSoftware
+    }
 }
 
 #[cfg(test)]
@@ -83,5 +123,15 @@ mod tests {
         assert!(!HsmDeferred.verify_detached(msg, sig.as_ref(), kp.pk.as_ref()));
         assert_eq!(soft.kind(), TrustBackendKind::SoftSoftware);
         assert_eq!(HsmDeferred.kind(), TrustBackendKind::HsmDeferred);
+        assert!(TrustBackendKind::SoftSoftware.is_implemented());
+        assert!(!TrustBackendKind::HsmDeferred.is_implemented());
+        assert!(!TrustBackendKind::SoftSoftware.is_production_ready());
+        assert_eq!(
+            select_host_backend_kind(false),
+            TrustBackendKind::SoftSoftware
+        );
+        assert_eq!(select_host_backend_kind(true), TrustBackendKind::HsmDeferred);
+        assert_eq!(soft.kind().as_str(), "soft-software");
+        assert_eq!(HsmDeferred.kind().as_str(), "hsm-deferred");
     }
 }

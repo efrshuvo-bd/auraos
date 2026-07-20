@@ -10,6 +10,8 @@ name = "aura-kernel"
 path = "src/main.rs"
 
 [dependencies]
+# Soft ed25519 verify (SCRUM-49). Pure Rust, no build script; default-features off → no_std.
+ed25519-compact = { version = "2.3.1", default-features = false }
 
 [profile.dev]
 panic = "abort"

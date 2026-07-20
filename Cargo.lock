@@ -106,6 +106,9 @@ dependencies = [
 [[package]]
 name = "aura-kernel"
 version = "0.1.0"
+dependencies = [
+ "ed25519-compact",
+]
 
 [[package]]
 name = "aura-ota-verify"

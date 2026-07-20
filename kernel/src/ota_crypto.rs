@@ -1,23 +1,36 @@
-//! On-device / boot-adjacent OTA digest verify (SCRUM-41).
+//! On-device / boot-adjacent OTA verify (SCRUM-41 / SCRUM-49).
 //!
-//! Pure-Rust SHA-256 + `sha256-dev:` accept/reject — **no_std**, no external
-//! crypto crates (WDAC-friendly). Algorithm and salt **must stay in sync** with
-//! `shared::ota` (`SHA256_DEV_PREFIX`, `DEV_DIGEST_SALT`, canonical form).
+//! Pure-Rust SHA-256 + `sha256-dev:` accept/reject, plus soft `ed25519:` via
+//! `ed25519-compact` (`default-features = false`, no build script) — **no_std**.
+//! Canonical form / pubkey **must stay in sync** with `shared::ota`.
 //!
-//! This is **not** HSM-backed and **not** ed25519 / verified boot. Production
-//! shipping still requires rotated keys + HSM + boot chain — see
+//! Soft ed25519 is **not** HSM-backed and **not** silicon verified boot.
+//! Production shipping still requires rotated keys + HSM + boot chain — see
 //! `docs/updates-4y.md` and `ota/dev-keys/README.md`.
 
-/// Legacy host token (literal). Kernel prefers `sha256-dev:`; kept for parity.
+use ed25519_compact::{PublicKey, Signature};
+
+/// Legacy host token (literal). Kernel prefers `sha256-dev:` / `ed25519:`; kept for parity.
 #[allow(dead_code)]
 pub const DEV_SIGNATURE: &str = "dev-signed";
 
 pub const SHA256_DEV_PREFIX: &str = "sha256-dev:";
 
+/// Prefix for software ed25519 signatures (`ed25519:<128 hex chars>` = 64 bytes).
+pub const ED25519_SOFT_PREFIX: &str = "ed25519:";
+
 /// Dev-only salt (clearly not an HSM secret) — identical to `shared::ota`.
 const DEV_DIGEST_SALT: &[u8] = b"AuraOS-ota-dev-salt-v1-NOT-HSM";
 
-/// Boot-demo fields matching `ota/fixtures/signed-sha256-dev-os.json`.
+/// RFC 8032 test-vector seed public key (dev/QEMU only — not production / not HSM).
+/// Must match `shared::ota::DEV_ED25519_PUBLIC_KEY`.
+pub const DEV_ED25519_PUBLIC_KEY: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
+
+/// Boot-demo fields matching `ota/fixtures/signed-sha256-dev-os.json` /
+/// `signed-ed25519-soft-os.json`.
 pub const BOOT_DEMO_CHANNEL: &str = "os";
 pub const BOOT_DEMO_VERSION: &str = "0.1.1";
 pub const BOOT_DEMO_SLOT: &str = "B";
@@ -26,7 +39,12 @@ pub const BOOT_DEMO_PAYLOAD_SHA256: &str =
 /// Expected digest for the boot-demo canonical payload + salt.
 pub const BOOT_DEMO_SIG: &str =
     "sha256-dev:fea8b7c20660696b1bdfeb0f23e4c7caa7d5cec5d40d1b5b70dfd28e83094b27";
-
+/// Soft ed25519 over canonical bytes (no salt) — matches host fixture.
+pub const BOOT_DEMO_ED25519_SIG: &str = concat!(
+    "ed25519:",
+    "e6df346c70c22e60038ae2a2e3f28d82975327012db471adf382114b30bc2633",
+    "2727ba540437a3c5289ab5d2c6596e1fa6c67e2d8ff19321f42340ac4a25a80b"
+);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum VerifyError {
     UnknownChannel,
@@ -74,6 +92,26 @@ impl<'a> ManifestView<'a> {
             signature: "sha256-dev:0000000000000000000000000000000000000000000000000000000000000000",
         }
     }
+
+    pub const fn boot_demo_ed25519() -> Self {
+        Self {
+            channel: BOOT_DEMO_CHANNEL,
+            version: BOOT_DEMO_VERSION,
+            target_slot: BOOT_DEMO_SLOT,
+            payload_sha256: BOOT_DEMO_PAYLOAD_SHA256,
+            signature: BOOT_DEMO_ED25519_SIG,
+        }
+    }
+
+    pub const fn boot_demo_ed25519_bad() -> Self {
+        Self {
+            channel: BOOT_DEMO_CHANNEL,
+            version: BOOT_DEMO_VERSION,
+            target_slot: BOOT_DEMO_SLOT,
+            payload_sha256: BOOT_DEMO_PAYLOAD_SHA256,
+            signature: "ed25519:00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        }
+    }
 }
 
 fn channel_ok(name: &str) -> bool {
@@ -101,7 +139,56 @@ pub fn verify_manifest_view(m: &ManifestView<'_>) -> Result<(), VerifyError> {
         }
         return Err(VerifyError::BadSignature);
     }
+    if let Some(hex) = sig.strip_prefix(ED25519_SOFT_PREFIX) {
+        let Some(sig_bytes) = hex_decode_64(hex) else {
+            return Err(VerifyError::BadSignature);
+        };
+        let mut msg = [0u8; 256];
+        let n = canonical_sign_bytes_into(m, &mut msg);
+        if soft_ed25519_verify(&msg[..n], &sig_bytes, &DEV_ED25519_PUBLIC_KEY) {
+            return Ok(());
+        }
+        return Err(VerifyError::BadSignature);
+    }
     Err(VerifyError::BadSignature)
+}
+
+/// Soft ed25519 verify (on-device). Same crate as host SoftEd25519 — not HSM.
+fn soft_ed25519_verify(message: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
+    let Ok(pk) = PublicKey::from_slice(public_key) else {
+        return false;
+    };
+    let Ok(sig) = Signature::from_slice(signature) else {
+        return false;
+    };
+    pk.verify(message, &sig).is_ok()
+}
+
+fn hex_decode_64(hex: &str) -> Option<[u8; 64]> {
+    if hex.len() != 128 {
+        return None;
+    }
+    let mut out = [0u8; 64];
+    for i in 0..64 {
+        let b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+        out[i] = b;
+    }
+    Some(out)
+}
+
+/// Canonical bytes for soft ed25519 (no salt) — identical to `shared::ota::canonical_sign_bytes`.
+fn canonical_sign_bytes_into(m: &ManifestView<'_>, buf: &mut [u8; 256]) -> usize {
+    let mut n = 0usize;
+    n = append(buf, n, b"aura-ota-v1\nchannel=");
+    n = append(buf, n, m.channel.as_bytes());
+    n = append(buf, n, b"\nversion=");
+    n = append(buf, n, m.version.as_bytes());
+    n = append(buf, n, b"\ntarget_slot=");
+    n = append(buf, n, m.target_slot.as_bytes());
+    n = append(buf, n, b"\npayload_sha256=");
+    n = append(buf, n, m.payload_sha256.as_bytes());
+    n = append(buf, n, b"\n");
+    n
 }
 
 fn digest_hex_into(m: &ManifestView<'_>, out: &mut [u8; 64]) {
@@ -121,7 +208,6 @@ fn digest_hex_into(m: &ManifestView<'_>, out: &mut [u8; 64]) {
     let digest = sha256(&buf[..n]);
     hex_encode(&digest, out);
 }
-
 fn append(buf: &mut [u8], n: usize, bytes: &[u8]) -> usize {
     let end = n + bytes.len();
     if end > buf.len() {
