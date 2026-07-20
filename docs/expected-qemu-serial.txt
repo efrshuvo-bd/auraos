@@ -30,6 +30,7 @@
 
 AuraOS kernel online
 board: qemu-virt (pi5 research stubs present; not a hardware driver)
+uart: qemu PL011 @ 0x09000000 (pi5 RP1 map research only; UART_EARLY_CONSOLE=false)
 phase1: uart + panic + frame allocator
 boot: initrd range from FDT /chosen
 phase2: heap + frame allocator ready
@@ -43,8 +44,12 @@ virtio: blk at mmio version=2 (modern)
 virtio: blk read sector0 ok
 virtio: A/B header magic ok active=A
 vb: stub chain bootloader->kernel->system (not silicon VB / not HSM)
+vb: silicon path deferred (board ROM/OTP trust anchors not wired)
+vb: stage bootloader stub ok (not silicon VB; signature verify deferred)
+vb: stage kernel stub ok (not silicon VB; signature verify deferred)
+vb: stage system stub ok (not silicon VB; soft path only)
 vb: stub refuse activate (trust failed; fail-closed)
-vb: stub trust ok (software path; HSM deferred)
+vb: stub trust ok (software path; HSM deferred; silicon deferred)
 ota: channels=os,agent,models (A/B metadata in ota/; apply path Sprint 8)
 ota: verify: refused unsigned (fail-closed before slot write)
 ota: verify: rejected bad sha256-dev (fail-closed)

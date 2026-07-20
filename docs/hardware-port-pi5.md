@@ -4,7 +4,8 @@ Phase 5 / Sprint 6 bring-up target for AuraOS (Tier C research board → Tier A 
 
 Jira: [SCRUM-30](https://auramislab.atlassian.net/browse/SCRUM-30) under epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12);
 Sprint 9 stretch [SCRUM-46](https://auramislab.atlassian.net/browse/SCRUM-46) under [SCRUM-43](https://auramislab.atlassian.net/browse/SCRUM-43);
-Sprint 10 [SCRUM-52](https://auramislab.atlassian.net/browse/SCRUM-52) under [SCRUM-48](https://auramislab.atlassian.net/browse/SCRUM-48).  
+Sprint 10 [SCRUM-52](https://auramislab.atlassian.net/browse/SCRUM-52) under [SCRUM-48](https://auramislab.atlassian.net/browse/SCRUM-48);
+Sprint 11 [SCRUM-56](https://auramislab.atlassian.net/browse/SCRUM-56) / [SCRUM-57](https://auramislab.atlassian.net/browse/SCRUM-57) under [SCRUM-53](https://auramislab.atlassian.net/browse/SCRUM-53).  
 In-tree board notes: `kernel/src/board_pi5.rs` (constants + feature flags only — **not** a working Pi 5 driver).  
 Linked from the [Development Plan](https://auramislab.atlassian.net/wiki/spaces/AuraOS/pages/295074) and [`docs/hardware.md`](hardware.md).
 
@@ -32,7 +33,7 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 | Step | Status | Notes |
 |------|--------|-------|
 | Document debug UART pinout / connector | Partial | See `board_pi5::UART_*` hints — verify against current Pi 5 docs before wiring |
-| Map PL011 (or SoC UART) MMIO base from DT | Partial (Sprint 9–10) | QEMU uses PL011 at `0x0900_0000`. Pi 5 debug console is typically on the **RP1** UART (not the BCM2712 PL011 at the QEMU virt address). Sprint 10: `board_pi5::UART_DT_NODE_HINT` records the expected `serial@…` under RP1 — still **not** parsed by `fdt.rs`; confirm baud + compatible string before coding `uart::init` for silicon |
+| Map PL011 (or SoC UART) MMIO base from DT | Partial (Sprint 9–11) | QEMU uses PL011 at `board_pi5::QEMU_PL011_MMIO_BASE` (`0x0900_0000`). Pi 5 debug console is typically on the **RP1** UART (not BCM2712 PL011 / not the QEMU address). Sprint 11: `EarlyConsoleMap` + `early_console_mmio_base` + `UART_DT_COMPATIBLE_HINT` / baud hint — still **not** parsed by `fdt.rs`; `UART_EARLY_CONSOLE` remains false; serial: `uart: qemu PL011 @ 0x09000000 (pi5 RP1 map research only; …)` |
 | Bring up `uart::init` against board MMIO | Deferred | Do **not** claim QEMU PL011 driver works on Pi 5 |
 | Print `AuraOS kernel online` on real hardware | Deferred | Milestone gate |
 
@@ -42,7 +43,7 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 |------|--------|-------|
 | Parse memory map from DT into `frame::init` | Open | QEMU hardcodes frame pool at `0x4400_0000` |
 | Adjust linker / load address for Pi image layout | Open | `boot/` + `kernel` linker script today assume QEMU virt |
-| Timer + GIC (or GICv3) bring-up | Partial (Sprint 10 research) | QEMU `gic.rs` hardcodes GICv2 distributor `0x0800_0000` / CPU iface `0x0801_0000`. Pi must **not** reuse those — next concrete step is DT walk of `interrupt-controller@…` (`board_pi5::GIC_DT_NODE_HINT`); `GIC_FROM_DT` remains false; no fake silicon GIC driver |
+| Timer + GIC (or GICv3) bring-up | Partial (Sprint 10–11 research) | QEMU `gic.rs` hardcodes GICv2 distributor `0x0800_0000` / CPU iface `0x0801_0000`. Pi must **not** reuse those — Sprint 11 adds `GIC_REDIST_BASE_UNVERIFIED`, `GIC_DT_COMPATIBLE_HINT`, `GIC_DT_REG_LAYOUT_HINT` for a future DT walker; `GIC_FROM_DT` remains false; no fake silicon GIC driver |
 | Storage for A/B slots (`ota/slots.json` semantics) | Open | Needs SD/eMMC or VirtIO-blk equivalent — see OTA docs |
 | Network for cloud Agent Core + OTA | Later | Not required for first serial milestone |
 
@@ -52,7 +53,7 @@ Clearer view of what is portable vs board-specific. **Do not** treat any Pi colu
 
 | Subsystem | QEMU `virt` today | Pi 5 research | Feature flag (`board_pi5::features`) | Next driver task |
 |-----------|-------------------|---------------|--------------------------------------|------------------|
-| Early console | PL011 `0x0900_0000` | Debug UART from DT | `UART_EARLY_CONSOLE` | Map DT UART → `uart::init`; keep QEMU path default |
+| Early console | PL011 `0x0900_0000` (`EarlyConsoleMap::QemuPl011`) | RP1 UART from DT (`Pi5Rp1FromDt`) | `UART_EARLY_CONSOLE` | Confirm compatible + baud; map DT UART → `uart::init`; keep QEMU path default |
 | Kernel entry | Raw `-kernel` @ `0x40080000`, FDT in `x0` | Firmware `kernel*.img` + DTB | — | Package image for Pi boot chain; verify EL |
 | Memory | Hardcoded pool `0x4400_0000` | `/memory` in DT | `DT_MEMORY_MAP` | DT walker → `frame::init` |
 | Interrupts | GICv2 virt defaults | DT GIC v2/v3 | `GIC_FROM_DT` | Re-probe distributor/CPU/redistributor |

@@ -1,5 +1,5 @@
-//! Board-specific notes for future Raspberry Pi 5 bring-up (Sprint 6–10 /
-//! SCRUM-30 / SCRUM-46 / SCRUM-52).
+//! Board-specific notes for future Raspberry Pi 5 bring-up (Sprint 6–11 /
+//! SCRUM-30 / SCRUM-46 / SCRUM-52 / SCRUM-56 / SCRUM-57).
 //!
 //! See `docs/hardware-port-pi5.md`.
 //!
@@ -17,13 +17,63 @@ pub const UART_HINT: &str = "Use Pi 5 debug UART for early console during port";
 /// Research label for the debug UART (confirm pinout before soldering).
 pub const UART_DEBUG_LABEL: &str = "Pi 5 debug UART (3-pin / dedicated header — verify current docs)";
 
-/// Placeholder MMIO base: **unknown until DT bring-up**. Not wired into `uart.rs`.
-/// QEMU virt continues to use PL011 at `0x0900_0000`.
+/// QEMU virt PL011 base used by `uart.rs` today (default early console).
+pub const QEMU_PL011_MMIO_BASE: usize = 0x0900_0000;
+
+/// Research: BCM2712 on-SoC PL011 may exist but is **not** the usual Pi 5 debug
+/// console — do not assume QEMU's `0x0900_0000` maps to anything useful on silicon.
+pub const BCM2712_PL011_NOTE: &str =
+    "BCM2712 PL011 (if present) ≠ QEMU virt PL011 @ 0x0900_0000; prefer RP1 debug UART";
+
+/// Placeholder MMIO base for Pi early console: **unknown until DT bring-up**.
+/// Not wired into `uart.rs`. QEMU virt continues to use [`QEMU_PL011_MMIO_BASE`].
 pub const UART_MMIO_BASE_UNVERIFIED: Option<usize> = None;
 
-/// Sprint 10 research: expected DT path hint for RP1 UART (confirm on silicon DT).
+/// Sprint 10–11 research: expected DT path hint for RP1 UART (confirm on silicon DT).
 /// Not parsed by `fdt.rs` yet — documentation only.
 pub const UART_DT_NODE_HINT: &str = "RP1 serial@… under /rp1 (not QEMU PL011 @ 0x0900_0000)";
+
+/// Compatible string research hint (confirm against Pi 5 DT before coding).
+pub const UART_DT_COMPATIBLE_HINT: &str = "arm,pl011 or vendor RP1 UART compatible (confirm on DT)";
+
+/// Target baud for first silicon console experiment (research only).
+pub const UART_EARLY_BAUD_HINT: u32 = 115_200;
+
+/// Which early-console map a future Pi image would prefer (selection helper).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EarlyConsoleMap {
+    /// Current supported path — `uart.rs` PL011 @ [`QEMU_PL011_MMIO_BASE`].
+    QemuPl011,
+    /// Future: MMIO from RP1 UART DT node (not implemented).
+    Pi5Rp1FromDt,
+    /// Explicitly unset — refuse to pretend silicon works.
+    Unverified,
+}
+
+/// Active early-console map for this binary. Always QEMU PL011 until a Pi image.
+pub const ACTIVE_EARLY_CONSOLE: EarlyConsoleMap = EarlyConsoleMap::QemuPl011;
+
+/// Resolve the MMIO base for early console given the research map.
+///
+/// Returns `Some(QEMU_PL011_MMIO_BASE)` for QEMU; `None` for Pi/unverified until DT.
+pub fn early_console_mmio_base(map: EarlyConsoleMap) -> Option<usize> {
+    match map {
+        EarlyConsoleMap::QemuPl011 => Some(QEMU_PL011_MMIO_BASE),
+        EarlyConsoleMap::Pi5Rp1FromDt => UART_MMIO_BASE_UNVERIFIED,
+        EarlyConsoleMap::Unverified => None,
+    }
+}
+
+/// One-line UART research status (honest: not a silicon driver).
+pub fn uart_research_status_line() -> &'static str {
+    match ACTIVE_EARLY_CONSOLE {
+        EarlyConsoleMap::QemuPl011 => {
+            "uart: qemu PL011 @ 0x09000000 (pi5 RP1 map research only; UART_EARLY_CONSOLE=false)"
+        }
+        EarlyConsoleMap::Pi5Rp1FromDt => "uart: pi5 RP1-from-DT profile (incomplete; not wired)",
+        EarlyConsoleMap::Unverified => "uart: unverified map (no early console MMIO)",
+    }
+}
 
 /// Target CPU architecture for the port (same as QEMU virt).
 pub const ARCH: &str = "aarch64";
@@ -39,9 +89,17 @@ pub const QEMU_GICC_BASE: usize = 0x0801_0000;
 pub const GIC_DIST_BASE_UNVERIFIED: Option<usize> = None;
 pub const GIC_CPU_BASE_UNVERIFIED: Option<usize> = None;
 
-/// Sprint 10 research: next DT walk for GIC (not implemented).
+/// GICv3 redistributor base from DT — **unset** (Pi may be v3; virt is v2).
+pub const GIC_REDIST_BASE_UNVERIFIED: Option<usize> = None;
+
+/// Sprint 10–11 research: next DT walk for GIC (not implemented).
 pub const GIC_DT_NODE_HINT: &str =
     "interrupt-controller@… — read reg for distributor + CPU/redistributor; do not hardcode virt";
+
+/// Compatible / cell research hints for a future DT walker (not parsed yet).
+pub const GIC_DT_COMPATIBLE_HINT: &str = "arm,gic-400 | arm,gic-v3 (confirm on Pi 5 DT)";
+pub const GIC_DT_REG_LAYOUT_HINT: &str =
+    "v2: dist + cpu iface; v3: dist + redistributor frame(s) — size from #redistributor-regions";
 
 /// Boot path note for packaging (not implemented).
 pub const BOOT_PATH_NOTE: &str =
@@ -95,4 +153,9 @@ pub fn any_pi5_driver_enabled() -> bool {
         || features::GIC_FROM_DT
         || features::STORAGE_AB_SLOTS
         || features::OTA_ON_DEVICE_APPLY
+}
+
+/// True when early console would use unverified Pi MMIO (always false on QEMU build).
+pub fn pi5_early_console_ready() -> bool {
+    features::UART_EARLY_CONSOLE && early_console_mmio_base(EarlyConsoleMap::Pi5Rp1FromDt).is_some()
 }
