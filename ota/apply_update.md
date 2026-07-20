@@ -27,6 +27,17 @@ Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 See `channels.json` and `README.md`. `models` is optional and must still be signed.
 Typed in code as `shared::ota::Channel` (`os` | `agent` | `models`).
 
+## On-device apply stub (SCRUM-36)
+
+Boot serial shows an explicit stub path (distinct from “nothing logged”):
+
+- `ota: apply stub: active=A inactive=B - would switch A<->B`
+- `ota: apply stub: refused unsigned (host aura-ota-verify remains authority)`
+- `ota: A/B not applied (no crypto / no slot write)`
+
+Shared helper: `shared::ota::plan_apply_stub`. Host `aura-ota-verify` remains the
+authority for unsigned rejection. No inactive-slot write and no verified-boot claim.
+
 ## Production crypto (deferred)
 
 The host stub accepts only the literal token `dev-signed`. That is **not** a

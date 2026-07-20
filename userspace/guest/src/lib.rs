@@ -10,6 +10,8 @@ pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
 pub const SYS_READ: u64 = 6;
+/// Non-blocking waitpid (pid=0 → any exited peer). Returns status or -1.
+pub const SYS_WAITPID: u64 = 7;
 
 #[inline(always)]
 pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> i64 {
@@ -58,10 +60,25 @@ pub fn yield_now() {
 }
 
 pub fn exit() -> ! {
+    exit_with(0)
+}
+
+pub fn exit_with(status: i32) -> ! {
     unsafe {
-        let _ = syscall3(SYS_EXIT, 0, 0, 0);
+        let _ = syscall3(SYS_EXIT, status as u64, 0, 0);
     }
     loop {}
+}
+
+/// Non-blocking waitpid. `pid == 0` waits for any exited peer process.
+/// Returns `Some(status)` if a process was reaped, `None` if none ready.
+pub fn waitpid_noblock(pid: u32) -> Option<i32> {
+    let n = unsafe { syscall3(SYS_WAITPID, pid as u64, 0, 0) };
+    if n < 0 {
+        None
+    } else {
+        Some(n as i32)
+    }
 }
 
 pub fn ipc_send(channel: u64, payload: u64) {

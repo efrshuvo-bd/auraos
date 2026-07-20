@@ -2,6 +2,7 @@
 
 use crate::console;
 use crate::ipc;
+use crate::process;
 use crate::sched;
 use crate::trap::TrapFrame;
 use crate::uart;
@@ -13,11 +14,13 @@ pub const SYS_EXIT: u64 = 3;
 pub const SYS_IPC_SEND: u64 = 4;
 pub const SYS_IPC_RECV: u64 = 5;
 pub const SYS_READ: u64 = 6;
+/// Non-blocking waitpid (a0=pid or 0=any, a1=unused). Returns status or -1.
+pub const SYS_WAITPID: u64 = 7;
 
 const USER_VA_MAX: u64 = 0x0000_0000_0080_0000;
 
 pub fn init() {
-    console::println("syscall: table ready (write/read/yield/exit/ipc)");
+    console::println("syscall: table ready (write/read/yield/exit/ipc/waitpid)");
 }
 
 /// Trap-based syscall entry (x8=nr, args in x0..).
@@ -32,6 +35,7 @@ pub fn dispatch_trap(num: u64, tf: &mut TrapFrame) -> i64 {
             0
         }
         SYS_EXIT => {
+            process::set_exit_status(a0 as i32);
             console::println("syscall: exit");
             0
         }
@@ -43,10 +47,20 @@ pub fn dispatch_trap(num: u64, tf: &mut TrapFrame) -> i64 {
             }
         }
         SYS_IPC_RECV => ipc::recv(a0 as u32) as i64,
+        SYS_WAITPID => sys_waitpid(a0),
         _ => {
             console::println("syscall: unknown");
             -1
         }
+    }
+}
+
+/// Non-blocking: returns exit status (>=0) of a reaped child, or -1 if none ready.
+fn sys_waitpid(pid: u64) -> i64 {
+    let waiter = process::current_pid();
+    match process::waitpid_noblock(waiter, pid as u32) {
+        Some((_reaped_pid, status)) => status as i64,
+        None => -1,
     }
 }
 

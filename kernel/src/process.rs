@@ -36,6 +36,10 @@ pub struct Process {
     pub state: State,
     pub ttbr0: usize,
     pub frame: TrapFrame,
+    /// Exit status from SYS_EXIT (valid when `state == Exited` and pid != 0).
+    pub exit_status: i32,
+    /// True once waitpid has reaped this exited slot (keeps status until reuse).
+    pub reaped: bool,
 }
 
 static mut PROCS: [Process; MAX_PROCS] = [Process {
@@ -44,6 +48,8 @@ static mut PROCS: [Process; MAX_PROCS] = [Process {
     state: State::Exited,
     ttbr0: 0,
     frame: TrapFrame::zero(),
+    exit_status: 0,
+    reaped: true,
 }; MAX_PROCS];
 
 static NEXT_PID: AtomicU32 = AtomicU32::new(1);
@@ -108,6 +114,8 @@ pub fn spawn(name: &'static str, image: &[u8]) -> bool {
             state: State::Runnable,
             ttbr0,
             frame,
+            exit_status: 0,
+            reaped: false,
         };
     }
     let used = SLOT_COUNT.load(Ordering::Relaxed);
@@ -115,6 +123,48 @@ pub fn spawn(name: &'static str, image: &[u8]) -> bool {
         SLOT_COUNT.store(idx + 1, Ordering::SeqCst);
     }
     true
+}
+
+/// Non-blocking wait for an exited process (Sprint 7 / SCRUM-37).
+///
+/// - `pid == 0`: first unreaped exited process other than the caller
+/// - `pid > 0`: that pid if exited and unreaped
+///
+/// Returns `Some((reaped_pid, status))`, or `None` if nothing ready (WNOHANG).
+pub fn waitpid_noblock(waiter_pid: u32, pid: u32) -> Option<(u32, i32)> {
+    unsafe {
+        for i in 0..SLOT_COUNT.load(Ordering::Relaxed).min(MAX_PROCS) {
+            let p = &mut PROCS[i];
+            if p.state != State::Exited || p.reaped || p.pid == 0 || p.pid == waiter_pid {
+                continue;
+            }
+            if pid != 0 && p.pid != pid {
+                continue;
+            }
+            p.reaped = true;
+            return Some((p.pid, p.exit_status));
+        }
+    }
+    None
+}
+
+pub fn current_pid() -> u32 {
+    let idx = CURRENT.load(Ordering::Relaxed);
+    if idx < MAX_PROCS {
+        unsafe { PROCS[idx].pid }
+    } else {
+        0
+    }
+}
+
+/// Record exit status for the current process (called from syscall before bridge).
+pub fn set_exit_status(status: i32) {
+    let idx = CURRENT.load(Ordering::Relaxed);
+    if idx < MAX_PROCS {
+        unsafe {
+            PROCS[idx].exit_status = status;
+        }
+    }
 }
 
 fn find_slot() -> Option<usize> {

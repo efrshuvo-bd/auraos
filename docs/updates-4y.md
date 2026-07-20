@@ -42,9 +42,18 @@ See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing 
 | Host reject-unsigned | `aura-ota-verify` (uses `shared::ota::verify_manifest`) |
 | Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` |
 | Rollback story | `ota/apply_update.md` |
-| Kernel on-device apply | **Not applied** — boot log `ota: A/B not applied` |
-| VirtIO-blk for slots | Probe stub only (`virtio: no blk device` / stub ok) |
+| Kernel on-device apply | **Stub** — logs would-switch A↔B + refuses unsigned; still `A/B not applied` |
+| VirtIO-blk for slots | QEMU read path for sector 0 (`build/ab-slots.img`, `prepare-ab-disk.ps1`) |
 | Production crypto / verified boot | **Deferred** — replace `dev-signed` with HSM-backed signatures |
+
+### QEMU A/B disk layout (SCRUM-35)
+
+| Item | Value |
+|------|--------|
+| Image | `build/ab-slots.img` via `.\scripts\prepare-ab-disk.ps1` |
+| QEMU flags | `-drive file=…,if=none,format=raw,id=abdisk` + `-device virtio-blk-device,drive=abdisk,bus=virtio-mmio-bus.2` |
+| Sector 0 | Magic `AURAAB`, byte 8 = active slot `'A'`/`'B'` |
+| Slot switch | Kernel OTA apply stub only (no write / no reboot flip yet) |
 
 Host verify (Sprint 6): `.\scripts\verify-ota.ps1` or `cargo test -p aura-ota-verify` —
 rejects unsigned payloads per the `dev-signed` contract in `ota/dev-keys/README.md`.
