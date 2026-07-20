@@ -56,8 +56,8 @@ Clearer view of what is portable vs board-specific. **Do not** treat any Pi colu
 | Interrupts | GICv2 virt defaults | DT GIC v2/v3 | `GIC_FROM_DT` | Re-probe distributor/CPU/redistributor |
 | Timer | CNTP PPI 30 | Architected timer; IRQ routing differs | (with GIC) | Confirm PPI/SPI after GIC |
 | Display | ramfb / VirtIO-GPU probe | HDMI / VC4 later | — | Out of first serial milestone |
-| Storage / A/B | initrd only; VirtIO-blk **probe stub** | SD/eMMC partitions | `STORAGE_AB_SLOTS` | Block driver + slot layout; see `ota/` |
-| OTA apply | Host `aura-ota-verify`; kernel logs “not applied” | Same metadata | `OTA_ON_DEVICE_APPLY` | On-device verify + inactive-slot write |
+| Storage / A/B | VirtIO-blk **sector0 read** + AURAAB header on QEMU | SD/eMMC partitions | `STORAGE_AB_SLOTS` | Full slot write + Pi storage |
+| OTA apply | Host verify + kernel **slot-switch stub** (no write) | Same metadata | `OTA_ON_DEVICE_APPLY` | On-device verify + inactive-slot write |
 
 Boot status line on QEMU today:  
 `board: qemu-virt (pi5 research stubs present; not a hardware driver)`  

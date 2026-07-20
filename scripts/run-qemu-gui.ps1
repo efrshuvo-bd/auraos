@@ -38,10 +38,16 @@ $env:Path = "$env:USERPROFILE\.cargo\bin;D:\scoop\shims;$env:Path"
 $Root = Split-Path -Parent $PSScriptRoot
 $kernelBin = Join-Path $Root "build\aura-kernel.bin"
 $initrd = Join-Path $Root "build\initrd.cpio"
+$abDisk = Join-Path $Root "build\ab-slots.img"
 
 if (-not (Test-Path -LiteralPath $kernelBin) -or -not (Test-Path -LiteralPath $initrd)) {
     Write-Host "Kernel/initrd missing; running build-kernel.ps1..."
     & "$PSScriptRoot\build-kernel.ps1"
+}
+
+if (-not (Test-Path -LiteralPath $abDisk)) {
+    Write-Host "A/B disk image missing; running prepare-ab-disk.ps1..."
+    & "$PSScriptRoot\prepare-ab-disk.ps1" -OutPath $abDisk
 }
 
 function Find-QemuAarch64 {
@@ -202,6 +208,8 @@ $qemuArgs = @(
     "-global", "virtio-mmio.force-legacy=false"
     "-device", "virtio-serial-device,bus=virtio-mmio-bus.0"
     "-device", "virtconsole,chardev=char0"
+    "-drive", "file=$abDisk,if=none,format=raw,id=abdisk"
+    "-device", "virtio-blk-device,drive=abdisk,bus=virtio-mmio-bus.2"
 ) + $gpuArgs + @(
     "-kernel", "$kernelBin"
     "-initrd", "$initrd"

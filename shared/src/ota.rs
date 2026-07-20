@@ -119,6 +119,36 @@ pub enum VerifyError {
     BadDevSignature,
 }
 
+/// Result of the on-device apply **planning** stub (no I/O, no crypto).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplyStubAction {
+    /// Unsigned / untrusted — refuse before any inactive-slot write.
+    RefuseUnsigned,
+    /// Dev-signed would select inactive slot; still no write in this skeleton.
+    StubWouldSwitch,
+}
+
+/// In-memory A/B apply plan used by the kernel/host stubs (SCRUM-36).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplyStubPlan {
+    pub active: SlotId,
+    pub inactive: SlotId,
+    pub action: ApplyStubAction,
+}
+
+/// Plan a stub slot switch. Does **not** write storage or claim verified boot.
+pub fn plan_apply_stub(active: SlotId, signed: bool) -> ApplyStubPlan {
+    ApplyStubPlan {
+        active,
+        inactive: active.other(),
+        action: if signed {
+            ApplyStubAction::StubWouldSwitch
+        } else {
+            ApplyStubAction::RefuseUnsigned
+        },
+    }
+}
+
 /// Host / design verify: reject unknown channels and anything not `dev-signed`.
 ///
 /// Production must replace this with real crypto under verified boot.
@@ -178,5 +208,19 @@ mod tests {
     fn slot_other_flips() {
         assert_eq!(SlotId::A.other(), SlotId::B);
         assert_eq!(SlotId::B.other(), SlotId::A);
+    }
+
+    #[test]
+    fn apply_stub_refuses_unsigned() {
+        let p = plan_apply_stub(SlotId::A, false);
+        assert_eq!(p.inactive, SlotId::B);
+        assert_eq!(p.action, ApplyStubAction::RefuseUnsigned);
+    }
+
+    #[test]
+    fn apply_stub_would_switch_when_signed() {
+        let p = plan_apply_stub(SlotId::B, true);
+        assert_eq!(p.inactive, SlotId::A);
+        assert_eq!(p.action, ApplyStubAction::StubWouldSwitch);
     }
 }

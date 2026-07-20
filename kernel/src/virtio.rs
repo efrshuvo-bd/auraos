@@ -1,22 +1,32 @@
-//! VirtIO-MMIO console (device id 3) — TX + polled RX for guest I/O.
+//! VirtIO-MMIO console (device id 3) + block (device id 2).
 //!
 //! Early kernel console stays on PL011 UART. After `init()`, guest writes prefer
 //! VirtIO console TX when a console device was negotiated.
 //!
-//! RX is **polled** (`read_bytes` / `poll`): the used ring is drained on demand.
-//! Full VirtIO IRQ → GIC delivery is deferred; `ack_irq` only clears MMIO status.
+//! Console RX: polled drain remains available; Sprint 7 also registers the
+//! VirtIO-MMIO SPI with GICv2 and drains the RX used ring from the IRQ path.
+//!
+//! Block: minimal modern virtio-blk read of sector 0 for A/B slot experimentation
+//! (`scripts/prepare-ab-disk.ps1` + `run-qemu*.ps1`).
 
-use core::sync::atomic::{AtomicBool, Ordering, fence};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering, fence};
 
 use crate::console;
 use crate::frame;
+use crate::gic;
 
 const VIRTIO_MMIO_BASE: usize = 0x0a00_0000;
 const VIRTIO_MMIO_STRIDE: usize = 0x200;
 const VIRTIO_MAGIC: u32 = 0x7472_6976; // "virt"
 const VIRTIO_ID_CONSOLE: u32 = 3;
-/// VirtIO block device id — needed later for A/B slot storage (not driven yet).
+/// VirtIO block device id — A/B slot storage on QEMU.
 const VIRTIO_ID_BLOCK: u32 = 2;
+/// QEMU virt: MMIO slot `i` uses SPI (16+i) → GIC IRQ ID = 32 + 16 + i.
+const VIRTIO_MMIO_IRQ_BASE: u32 = 48;
+
+const VIRTIO_BLK_T_IN: u32 = 0;
+const VIRTQ_DESC_F_NEXT: u16 = 1;
+const BLK_SECTOR_SIZE: usize = 512;
 
 const REG_MAGIC: usize = 0x000;
 const REG_VERSION: usize = 0x004;
@@ -56,6 +66,8 @@ const Q_RX: u32 = 0;
 const Q_TX: u32 = 1;
 
 static READY: AtomicBool = AtomicBool::new(false);
+static CONSOLE_IRQ: AtomicU32 = AtomicU32::new(0);
+static BLK_READY: AtomicBool = AtomicBool::new(false);
 
 struct QueuePages {
     desc: usize,
@@ -82,6 +94,17 @@ struct ConsoleDev {
 const RX_CHUNK: usize = frame::PAGE_SIZE / QUEUE_SIZE;
 
 static mut DEV: Option<ConsoleDev> = None;
+
+struct BlkDev {
+    base: usize,
+    _version: u32,
+    q: QueuePages,
+    req_page: usize,
+    avail_idx: u16,
+    used_idx: u16,
+}
+
+static mut BLK: Option<BlkDev> = None;
 
 #[inline]
 unsafe fn r32(base: usize, off: usize) -> u32 {
@@ -124,12 +147,12 @@ struct VirtqUsed {
 
 pub fn init() {
     READY.store(false, Ordering::SeqCst);
-    let Some(base) = find_console() else {
+    CONSOLE_IRQ.store(0, Ordering::SeqCst);
+    let Some((base, version, slot)) = find_device_slot(VIRTIO_ID_CONSOLE) else {
         console::println("virtio: no console device (using UART syscalls)");
         return;
     };
 
-    let version = unsafe { r32(base, REG_VERSION) };
     console::print("virtio: console at mmio version=");
     console::print(match version {
         1 => "1 (legacy)",
@@ -146,8 +169,10 @@ pub fn init() {
         return;
     }
 
+    let irq = VIRTIO_MMIO_IRQ_BASE + slot as u32;
+    CONSOLE_IRQ.store(irq, Ordering::SeqCst);
     READY.store(true, Ordering::SeqCst);
-    console::println("virtio: console TX/RX ready (RX polled; IRQ deferred)");
+    console::println("virtio: console TX/RX ready (RX polled + IRQ path)");
     // Smoke-poll once so RX used-ring drain / reseed is exercised at boot.
     let mut scratch = [0u8; 16];
     let n = read_bytes(&mut scratch).unwrap_or(0);
@@ -158,32 +183,101 @@ pub fn init() {
     }
 }
 
+/// Register VirtIO console SPI with GIC (call after `gic::init`).
+pub fn enable_irqs() {
+    let irq = CONSOLE_IRQ.load(Ordering::Acquire);
+    if irq == 0 || !is_ready() {
+        console::println("virtio: console IRQ skip (no device)");
+        return;
+    }
+    gic::enable_irq(irq);
+    console::print("virtio: console IRQ registered GIC ");
+    print_u32(irq);
+    console::println(" (drain RX on IRQ; poll still ok)");
+}
+
+/// Handle a GIC IRQ that may belong to VirtIO console. Returns true if claimed.
+pub fn handle_irq(irq: u32) -> bool {
+    let console_irq = CONSOLE_IRQ.load(Ordering::Acquire);
+    if console_irq == 0 || irq != console_irq || !is_ready() {
+        return false;
+    }
+    let mut scratch = [0u8; RX_CHUNK];
+    let _ = read_bytes(&mut scratch);
+    // Always clear MMIO interrupt status — VirtIO-MMIO is level-triggered; skipping
+    // ACK when the RX used ring is empty livelocks EL0 (SCRUM-34).
+    if let Some(base) = console_mmio_base() {
+        unsafe {
+            ack_irq(base);
+        }
+    }
+    true
+}
+
+fn console_mmio_base() -> Option<usize> {
+    unsafe { DEV.as_ref().map(|d| d.base) }
+}
+
 pub fn is_ready() -> bool {
     READY.load(Ordering::Acquire)
 }
 
-/// Probe-only VirtIO-blk presence log for future A/B storage.
+/// Discover VirtIO-blk, negotiate a single request queue, read sector 0.
 ///
-/// Does **not** negotiate queues or claim a working block driver. Default QEMU
-/// runs usually have no virtio-blk; when one is added later, this line confirms
-/// discovery before a real driver lands.
-pub fn probe_block_stub() {
-    match find_device(VIRTIO_ID_BLOCK) {
-        Some((_base, version)) => {
-            console::print("virtio: blk probe ok version=");
-            console::print(match version {
-                1 => "1 (legacy)",
-                2 => "2 (modern)",
-                _ => "?",
-            });
-            console::println(" (stub only; A/B storage not applied)");
-        }
-        None => {
-            console::println(
-                "virtio: no blk device (A/B storage design: see docs/updates-4y.md + ota/)",
-            );
-        }
+/// Expects QEMU `-drive …,if=none,id=abdisk` +
+/// `-device virtio-blk-device,drive=abdisk,bus=virtio-mmio-bus.2`
+/// (see `scripts/prepare-ab-disk.ps1` / `run-qemu.ps1`).
+pub fn init_block() {
+    BLK_READY.store(false, Ordering::SeqCst);
+    unsafe {
+        BLK = None;
     }
+    let Some((base, version, _slot)) = find_device_slot(VIRTIO_ID_BLOCK) else {
+        console::println(
+            "virtio: no blk device (A/B storage: see docs/updates-4y.md + ota/)",
+        );
+        return;
+    };
+
+    console::print("virtio: blk at mmio version=");
+    console::print(match version {
+        1 => "1 (legacy)",
+        2 => "2 (modern)",
+        _ => "?",
+    });
+    console::println("");
+
+    if setup_block(base, version).is_err() {
+        console::println("virtio: blk setup failed");
+        unsafe {
+            w32(base, REG_STATUS, STATUS_FAILED);
+        }
+        return;
+    }
+
+    BLK_READY.store(true, Ordering::SeqCst);
+    let mut sector = [0u8; BLK_SECTOR_SIZE];
+    match read_block_sector(0, &mut sector) {
+        Ok(()) => {
+            console::println("virtio: blk read sector0 ok");
+            if &sector[0..6] == b"AURAAB" {
+                console::print("virtio: A/B header magic ok active=");
+                let slot = sector[8];
+                console::println(match slot {
+                    b'A' | b'a' => "A",
+                    b'B' | b'b' => "B",
+                    _ => "?",
+                });
+            } else {
+                console::println("virtio: A/B header magic missing (raw disk ok)");
+            }
+        }
+        Err(()) => console::println("virtio: blk read sector0 failed"),
+    }
+}
+
+pub fn block_ready() -> bool {
+    BLK_READY.load(Ordering::Acquire)
 }
 
 /// Write bytes to VirtIO console TX. Returns false if VirtIO is unavailable.
@@ -232,13 +326,14 @@ pub fn poll() {
     let _ = read_bytes(&mut scratch);
 }
 
-fn find_console() -> Option<usize> {
-    find_device(VIRTIO_ID_CONSOLE).map(|(base, _)| base)
-}
-
 /// Scan VirtIO-MMIO slots for `device_id`. Returns `(mmio_base, version)`.
 pub fn find_device(device_id: u32) -> Option<(usize, u32)> {
-    for i in 0..8 {
+    find_device_slot(device_id).map(|(base, version, _)| (base, version))
+}
+
+/// Like [`find_device`], also returning the MMIO slot index (for GIC SPI mapping).
+fn find_device_slot(device_id: u32) -> Option<(usize, u32, usize)> {
+    for i in 0..32 {
         let base = VIRTIO_MMIO_BASE + i * VIRTIO_MMIO_STRIDE;
         let magic = unsafe { r32(base, REG_MAGIC) };
         if magic != VIRTIO_MAGIC {
@@ -247,10 +342,25 @@ pub fn find_device(device_id: u32) -> Option<(usize, u32)> {
         let id = unsafe { r32(base, REG_DEVICE_ID) };
         if id == device_id {
             let version = unsafe { r32(base, REG_VERSION) };
-            return Some((base, version));
+            return Some((base, version, i));
         }
     }
     None
+}
+
+fn print_u32(mut v: u32) {
+    if v == 0 {
+        console::print("0");
+        return;
+    }
+    let mut buf = [0u8; 10];
+    let mut i = 10;
+    while v > 0 {
+        i -= 1;
+        buf[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+    }
+    console::print(core::str::from_utf8(&buf[i..]).unwrap_or("?"));
 }
 
 fn setup_device(base: usize, version: u32) -> Result<(), ()> {
@@ -557,4 +667,153 @@ unsafe fn ack_irq(base: usize) {
     if st != 0 {
         w32(base, REG_INTERRUPT_ACK, st);
     }
+}
+
+/// VirtIO-blk request header (type / reserved / sector) — little-endian on virt.
+#[repr(C)]
+struct BlkReq {
+    type_: u32,
+    reserved: u32,
+    sector: u64,
+}
+
+fn setup_block(base: usize, version: u32) -> Result<(), ()> {
+    unsafe {
+        w32(base, REG_STATUS, 0);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER);
+
+        w32(base, REG_DEVICE_FEATURES_SEL, 0);
+        let _host0 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DEVICE_FEATURES_SEL, 1);
+        let _host1 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DRIVER_FEATURES_SEL, 0);
+        w32(base, REG_DRIVER_FEATURES, 0);
+        w32(base, REG_DRIVER_FEATURES_SEL, 1);
+        w32(base, REG_DRIVER_FEATURES, 0);
+
+        if version >= 2 {
+            w32(
+                base,
+                REG_STATUS,
+                STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
+            );
+            let st = r32(base, REG_STATUS);
+            if (st & STATUS_FEATURES_OK) == 0 {
+                return Err(());
+            }
+        }
+
+        if version == 1 {
+            w32(base, REG_GUEST_PAGE_SIZE, frame::PAGE_SIZE as u32);
+        }
+
+        let q = alloc_queue(version)?;
+        let req_page = frame::alloc_frame().ok_or(())?;
+        setup_queue(base, version, 0, &q)?;
+
+        let mut st = STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_DRIVER_OK;
+        if version >= 2 {
+            st |= STATUS_FEATURES_OK;
+        }
+        w32(base, REG_STATUS, st);
+
+        BLK = Some(BlkDev {
+            base,
+            _version: version,
+            q,
+            req_page,
+            avail_idx: 0,
+            used_idx: 0,
+        });
+    }
+    Ok(())
+}
+
+fn read_block_sector(sector: u64, out: &mut [u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
+    let dev = unsafe {
+        match BLK.as_mut() {
+            Some(d) => d,
+            None => return Err(()),
+        }
+    };
+    unsafe { blk_read_one(dev, sector, out) }
+}
+
+unsafe fn blk_read_one(
+    dev: &mut BlkDev,
+    sector: u64,
+    out: &mut [u8; BLK_SECTOR_SIZE],
+) -> Result<(), ()> {
+    // Layout in req_page: BlkReq (16) | data (512) | status (1)
+    let req_off = 0usize;
+    let data_off = 16usize;
+    let status_off = 16 + BLK_SECTOR_SIZE;
+    if status_off + 1 > frame::PAGE_SIZE {
+        return Err(());
+    }
+
+    let req = BlkReq {
+        type_: VIRTIO_BLK_T_IN,
+        reserved: 0,
+        sector,
+    };
+    core::ptr::write_volatile((dev.req_page + req_off) as *mut BlkReq, req);
+    core::ptr::write_bytes((dev.req_page + data_off) as *mut u8, 0, BLK_SECTOR_SIZE);
+    core::ptr::write_volatile((dev.req_page + status_off) as *mut u8, 0xff);
+
+    let desc = dev.q.desc as *mut VirtqDesc;
+    // desc 0: header (device-readable)
+    (*desc.add(0)).addr = (dev.req_page + req_off) as u64;
+    (*desc.add(0)).len = core::mem::size_of::<BlkReq>() as u32;
+    (*desc.add(0)).flags = VIRTQ_DESC_F_NEXT;
+    (*desc.add(0)).next = 1;
+    // desc 1: data (device-writable)
+    (*desc.add(1)).addr = (dev.req_page + data_off) as u64;
+    (*desc.add(1)).len = BLK_SECTOR_SIZE as u32;
+    (*desc.add(1)).flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    (*desc.add(1)).next = 2;
+    // desc 2: status (device-writable)
+    (*desc.add(2)).addr = (dev.req_page + status_off) as u64;
+    (*desc.add(2)).len = 1;
+    (*desc.add(2)).flags = VIRTQ_DESC_F_WRITE;
+    (*desc.add(2)).next = 0;
+
+    let avail = dev.q.avail as *mut VirtqAvail;
+    let a_slot = (dev.avail_idx as usize) % QUEUE_SIZE;
+    (*avail).ring[a_slot] = 0;
+    fence(Ordering::SeqCst);
+    dev.avail_idx = dev.avail_idx.wrapping_add(1);
+    (*avail).idx = dev.avail_idx;
+    fence(Ordering::SeqCst);
+
+    w32(dev.base, REG_QUEUE_SEL, 0);
+    w32(dev.base, REG_QUEUE_NOTIFY, 0);
+
+    let used = dev.q.used as *const VirtqUsed;
+    let mut ok = false;
+    for _ in 0..2_000_000 {
+        fence(Ordering::SeqCst);
+        if (*used).idx != dev.used_idx {
+            dev.used_idx = (*used).idx;
+            ok = true;
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    ack_irq(dev.base);
+    if !ok {
+        return Err(());
+    }
+
+    let status = core::ptr::read_volatile((dev.req_page + status_off) as *const u8);
+    if status != 0 {
+        return Err(());
+    }
+    core::ptr::copy_nonoverlapping(
+        (dev.req_page + data_off) as *const u8,
+        out.as_mut_ptr(),
+        BLK_SECTOR_SIZE,
+    );
+    Ok(())
 }

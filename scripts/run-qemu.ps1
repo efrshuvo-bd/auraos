@@ -5,10 +5,16 @@ $env:Path = "$env:USERPROFILE\.cargo\bin;D:\scoop\shims;$env:Path"
 $Root = Split-Path -Parent $PSScriptRoot
 $kernelBin = Join-Path $Root "build\aura-kernel.bin"
 $initrd = Join-Path $Root "build\initrd.cpio"
+$abDisk = Join-Path $Root "build\ab-slots.img"
 
 if (-not (Test-Path -LiteralPath $kernelBin) -or -not (Test-Path -LiteralPath $initrd)) {
     Write-Host "Kernel/initrd missing; running build-kernel.ps1..."
     & "$PSScriptRoot\build-kernel.ps1"
+}
+
+if (-not (Test-Path -LiteralPath $abDisk)) {
+    Write-Host "A/B disk image missing; running prepare-ab-disk.ps1..."
+    & "$PSScriptRoot\prepare-ab-disk.ps1" -OutPath $abDisk
 }
 
 function Find-QemuAarch64 {
@@ -57,9 +63,11 @@ if (-not (Test-Path -LiteralPath $initrd)) {
 Write-Host "Using QEMU: $qemu"
 Write-Host "Starting QEMU (Ctrl+A X to exit qemu)..."
 Write-Host "Headless serial path (-nographic). For ramfb GUI window: .\scripts\run-qemu-gui.ps1"
+Write-Host "VirtIO-blk A/B disk: $abDisk (bus=virtio-mmio-bus.2)"
 # Raw kernel.bin (not ELF): QEMU Linux boot path loads -initrd and passes FDT in x0.
 # Guests come from initrd cpio; VirtIO console for guest SYS_WRITE; UART for early boot.
 # Mux stdio so PL011 + virtconsole share the same terminal.
+# VirtIO-blk on mmio-bus.2 for A/B slot experimentation (leave bus.1 for optional GPU).
 # No -device ramfb / virtio-gpu here (CI-friendly); display::init will log skips.
 & "$qemu" `
     -machine virt,gic-version=2 `
@@ -72,5 +80,7 @@ Write-Host "Headless serial path (-nographic). For ramfb GUI window: .\scripts\r
     -global virtio-mmio.force-legacy=false `
     -device virtio-serial-device,bus=virtio-mmio-bus.0 `
     -device virtconsole,chardev=char0 `
+    -drive "file=$abDisk,if=none,format=raw,id=abdisk" `
+    -device virtio-blk-device,drive=abdisk,bus=virtio-mmio-bus.2 `
     -kernel "$kernelBin" `
     -initrd "$initrd"

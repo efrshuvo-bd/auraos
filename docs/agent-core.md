@@ -41,4 +41,6 @@ Guest protocol (Sprint 4):
 - `guest-init` waits for READY; if missing, prints `FAIL CLOSED` and exits without treating the session as healthy.
 - `guest-shell` also refuses a normal session without READY / successful `help` + `system_status`.
 
-True process-wait supervision (waitpid) is still future work; READY + tool timeouts are the Sprint 4 fail-closed signal.
+Sprint 7 adds a thin non-blocking `SYS_WAITPID` (guest `waitpid_noblock`). Kernel
+still loads init/agent/shell from initrd; init exercises waitpid and keeps
+READY-based fail-closed. Full init-owned spawn of agent/shell remains deferred.
