@@ -1,6 +1,6 @@
 //! OTA A/B manifest types shared by host verify and future on-device agents.
 //!
-//! Sprint 6–9 verify API:
+//! Sprint 6–10 verify API:
 //! - Reject unsigned / empty signatures (fail-closed).
 //! - Accept legacy token `dev-signed` (not cryptography).
 //! - Accept production-leaning `sha256-dev:<hex>` over a canonical payload
@@ -9,8 +9,9 @@
 //!   via `ed25519-compact`; **not** HSM-backed). See `shared::trust`.
 //!
 //! On-device / boot-adjacent verify lives in `kernel/src/ota_crypto.rs` and uses
-//! the **same** SHA-256 + salt + canonical form (keep in sync). Kernel soft
-//! ed25519 is optional; HSM + full verified boot remain roadmap in
+//! the **same** SHA-256 + salt + canonical form and soft ed25519 pubkey (keep
+//! in sync). Pass any `impl TrustBackend` to [`verify_manifest_with`] for an
+//! HSM-ready swap. HSM + silicon verified boot remain roadmap in
 //! `docs/updates-4y.md`.
 
 use crate::trust::{SoftEd25519, TrustBackend};

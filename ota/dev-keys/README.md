@@ -2,7 +2,8 @@
 
 Sprint 6 / [SCRUM-31](https://auramislab.atlassian.net/browse/SCRUM-31);
 Sprint 8 / [SCRUM-41](https://auramislab.atlassian.net/browse/SCRUM-41);
-Sprint 9 / [SCRUM-44](https://auramislab.atlassian.net/browse/SCRUM-44).
+Sprint 9 / [SCRUM-44](https://auramislab.atlassian.net/browse/SCRUM-44);
+Sprint 10 / [SCRUM-49](https://auramislab.atlassian.net/browse/SCRUM-49) / [SCRUM-50](https://auramislab.atlassian.net/browse/SCRUM-50).
 
 - **Do not** ship production secrets from this tree.
 - Host verify (`tools/ota-verify` + `shared::ota::verify_manifest`) accepts:
@@ -14,8 +15,14 @@ Sprint 9 / [SCRUM-44](https://auramislab.atlassian.net/browse/SCRUM-44).
      (no salt) against the in-tree RFC8032-dev public key via
      `shared::trust::SoftEd25519` (`ed25519-compact`, no build script). **Not**
      HSM-backed. Future `HsmDeferred` backend always fails closed.
+- **HSM-ready swap (SCRUM-50):** implement `TrustBackend` for a real HSM and pass
+  it to `verify_manifest_with` (or replace `default_host_backend`).
+  `select_host_backend_kind(prefer_hsm)` returns the intended kind without
+  pretending HSM verify works.
 - On-device verify (`kernel/src/ota_crypto.rs`) uses the **same** salt + canonical
-  form for `sha256-dev:` and gates A/B slot writes (fail-closed on unsigned / bad digest).
+  form for `sha256-dev:` and the **same** canonical + pubkey for soft `ed25519:`
+  (Sprint 10). Both gate A/B slot writes (fail-closed on unsigned / bad digest /
+  bad sig).
 - Fixtures: `ota/fixtures/signed-*.json` (`dev-signed`),
   `signed-sha256-dev-os.json`, `signed-ed25519-soft-os.json`.
 - **What "production" still means:** HSM-backed keys, rotated ed25519 trust

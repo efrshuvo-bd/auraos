@@ -96,7 +96,7 @@ Epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12) — Device bri
 - **OTA A/B (SCRUM-31):** Channels `os` / `agent` / `models` in `ota/channels.json` and `shared::ota`; A/B state in `ota/slots.json`; rollback in `ota/apply_update.md`. Host `aura-ota-verify` uses shared `verify_manifest` and rejects unsigned manifests (dev token `dev-signed` only). Kernel logs `ota: A/B not applied`. VirtIO-blk probe stub only. Aligns with [`docs/updates-4y.md`](updates-4y.md).
 - **Docs sync (SCRUM-32):** Development Plan + Confluence Architecture link epic SCRUM-12 and these Phase 5 notes.
 
-Deferred: real Pi UART/GIC drivers, HSM-backed production signatures / silicon verified boot (soft ed25519 host + VB stub landed in Sprint 9).
+Deferred: real Pi UART/GIC drivers, HSM-backed production signatures / silicon verified boot (soft ed25519 host + on-device + VB stub landed Sprint 9–10).
 
 ## Next kernel milestones
 
