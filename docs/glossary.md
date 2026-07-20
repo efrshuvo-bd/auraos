@@ -189,7 +189,9 @@ Related: [architecture.md](architecture.md) · [agent-core.md](agent-core.md) ·
 
 **Rollback** — Revert to the previous good slot after a failed update/boot. Documented in `ota/apply_update.md`; full on-device apply remains incomplete.
 
-**Signed / unsigned** — Cryptographic authenticity of update blobs. In AuraOS: host verify rejects unsigned; production crypto / HSM-backed signatures are deferred.
+**Signed / unsigned** — Cryptographic authenticity of update blobs. In AuraOS: host verify rejects unsigned; production crypto / HSM-backed signatures are deferred. See also [HSM](#hsm-hardware-security-module).
+
+**HSM (Hardware Security Module)** — A dedicated crypto device (or cloud equivalent) that holds private keys and performs signing/verification so keys never sit as plain files on a build laptop. In AuraOS: production OTA and verified-boot signing keys are planned to live in an HSM; that work is **currently deferred**. Today demos use software-only paths such as `sha256-dev` digests and `dev-signed` tokens (see [Signed / unsigned](#signed--unsigned), [OTA](#ota-over-the-air), [Verified boot](#verified-boot)).
 
 **Verified boot** — Chain of trust from bootloader → kernel → system that rejects tampered images. In AuraOS: product requirement for shipping devices; **not** implemented as production trust yet.
 
