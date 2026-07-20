@@ -1,16 +1,19 @@
 //! OTA A/B manifest types shared by host verify and future on-device agents.
 //!
-//! Sprint 6–8 verify API:
+//! Sprint 6–9 verify API:
 //! - Reject unsigned / empty signatures (fail-closed).
 //! - Accept legacy token `dev-signed` (not cryptography).
 //! - Accept production-leaning `sha256-dev:<hex>` over a canonical payload
-//!   (real digest check; **dev** salt only — not HSM / not ed25519 yet).
+//!   (real digest check; **dev** salt only — not HSM).
+//! - Accept soft `ed25519:<hex>` over the canonical payload (software ed25519
+//!   via `ed25519-compact`; **not** HSM-backed). See `shared::trust`.
 //!
 //! On-device / boot-adjacent verify lives in `kernel/src/ota_crypto.rs` and uses
-//! the **same** SHA-256 + salt + canonical form (keep in sync). Full ed25519 +
-//! HSM + verified boot remain the roadmap in `docs/updates-4y.md` (heavy crypto
-//! crates currently blocked on some Windows WDAC hosts).
+//! the **same** SHA-256 + salt + canonical form (keep in sync). Kernel soft
+//! ed25519 is optional; HSM + full verified boot remain roadmap in
+//! `docs/updates-4y.md`.
 
+use crate::trust::{SoftEd25519, TrustBackend};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -20,8 +23,18 @@ pub const DEV_SIGNATURE: &str = "dev-signed";
 /// Prefix for SHA-256-dev signatures in manifest `signature` field.
 pub const SHA256_DEV_PREFIX: &str = "sha256-dev:";
 
+/// Prefix for software ed25519 signatures (`ed25519:<128 hex chars>` = 64 bytes).
+pub const ED25519_SOFT_PREFIX: &str = "ed25519:";
+
 /// Dev-only salt mixed into the digest (clearly not an HSM secret).
 pub const DEV_DIGEST_SALT: &[u8] = b"AuraOS-ota-dev-salt-v1-NOT-HSM";
+
+/// RFC 8032 test-vector seed public key (dev/QEMU only — not production / not HSM).
+/// Seed `9d61b19d…7f60` → pubkey below; private material must not ship as a product secret.
+pub const DEV_ED25519_PUBLIC_KEY: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
 
 /// Canonical bytes digested for `sha256-dev:` signatures.
 pub fn canonical_sign_bytes(m: &UpdateManifest) -> Vec<u8> {
@@ -141,7 +154,8 @@ pub struct UpdateManifest {
     pub target_slot: Option<String>,
     #[serde(default)]
     pub payload_sha256: Option<String>,
-    /// Absent/empty → unsigned. `dev-signed` → legacy. `sha256-dev:<hex>` → digest path.
+    /// Absent/empty → unsigned. `dev-signed` → legacy. `sha256-dev:<hex>` → digest.
+    /// `ed25519:<hex>` → soft software ed25519 (not HSM).
     #[serde(default)]
     pub signature: Option<String>,
 }
@@ -183,9 +197,17 @@ pub fn plan_apply_stub(active: SlotId, signed: bool) -> ApplyStubPlan {
     }
 }
 
-/// Host verify: reject unknown channels / unsigned; accept `dev-signed` or
-/// matching `sha256-dev:` digests (dev salt — not HSM / not ed25519 yet).
+/// Host verify: reject unknown channels / unsigned; accept `dev-signed`,
+/// matching `sha256-dev:` digests, or soft `ed25519:` (dev pubkey; not HSM).
 pub fn verify_manifest(m: &UpdateManifest) -> Result<(), VerifyError> {
+    verify_manifest_with(m, &SoftEd25519)
+}
+
+/// Same as [`verify_manifest`] but with an explicit [`TrustBackend`] (HSM-ready shape).
+pub fn verify_manifest_with(
+    m: &UpdateManifest,
+    backend: &impl TrustBackend,
+) -> Result<(), VerifyError> {
     if Channel::parse(&m.channel).is_none() {
         return Err(VerifyError::UnknownChannel(m.channel.clone()));
     }
@@ -200,8 +222,32 @@ pub fn verify_manifest(m: &UpdateManifest) -> Result<(), VerifyError> {
                 Err(VerifyError::BadSignature)
             }
         }
+        Some(sig) if sig.starts_with(ED25519_SOFT_PREFIX) => {
+            let hex = sig.strip_prefix(ED25519_SOFT_PREFIX).unwrap_or("");
+            let Some(sig_bytes) = hex_decode_64(hex) else {
+                return Err(VerifyError::BadSignature);
+            };
+            let msg = canonical_sign_bytes(m);
+            if backend.verify_detached(&msg, &sig_bytes, &DEV_ED25519_PUBLIC_KEY) {
+                Ok(())
+            } else {
+                Err(VerifyError::BadSignature)
+            }
+        }
         Some(_) => Err(VerifyError::BadSignature),
     }
+}
+
+fn hex_decode_64(hex: &str) -> Option<[u8; 64]> {
+    if hex.len() != 128 {
+        return None;
+    }
+    let mut out = [0u8; 64];
+    for i in 0..64 {
+        let b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+        out[i] = b;
+    }
+    Some(out)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -394,6 +440,27 @@ mod tests {
         assert_eq!(
             hex_encode(&sha256(b"")),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn ed25519_soft_accept_and_reject() {
+        // Fixture signature over canonical_sign_bytes for boot-demo fields
+        // (signed offline with RFC8032 seed; see ota/fixtures/signed-ed25519-soft-os.json).
+        let mut good = m("os", None);
+        good.signature = Some(format!(
+            "{ED25519_SOFT_PREFIX}e6df346c70c22e60038ae2a2e3f28d82975327012db471adf382114b30bc26332727ba540437a3c5289ab5d2c6596e1fa6c67e2d8ff19321f42340ac4a25a80b"
+        ));
+        assert_eq!(verify_manifest(&good), Ok(()));
+
+        let mut bad = good.clone();
+        bad.version = "9.9.9".into();
+        assert_eq!(verify_manifest(&bad), Err(VerifyError::BadSignature));
+
+        use crate::trust::HsmDeferred;
+        assert_eq!(
+            verify_manifest_with(&good, &HsmDeferred),
+            Err(VerifyError::BadSignature)
         );
     }
 }

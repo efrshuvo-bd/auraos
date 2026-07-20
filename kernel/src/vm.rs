@@ -176,3 +176,88 @@ fn split_block_to_pages(l2: &mut Table, i2: usize) -> bool {
     l2.0[i2] = pte_table(l3 as *mut Table as usize);
     true
 }
+
+/// Tear down a process address space (SCRUM-47).
+///
+/// Frees user-mapped pages and all page-table frames belonging to this TTBR0.
+/// Does **not** free identity-mapped 2MB physical RAM/MMIO (only the tables).
+pub fn destroy_address_space(ttbr0: usize) {
+    if ttbr0 == 0 || ttbr0 == unsafe { KERNEL_L0 } {
+        return;
+    }
+    let l0 = unsafe { &mut *(ttbr0 as *mut Table) };
+    for i0 in 0..ENTRIES {
+        let e0 = l0.0[i0];
+        if e0 & 1 == 0 {
+            continue;
+        }
+        if e0 & 0b10 == 0 {
+            continue; // unexpected block at L0
+        }
+        let l1_phys = (e0 & !0xfff) as usize;
+        destroy_l1(l1_phys);
+        frame::free_frame(l1_phys);
+        l0.0[i0] = 0;
+    }
+    frame::free_frame(ttbr0);
+    unsafe {
+        asm!("tlbi vmalle1", options(nostack));
+        asm!("dsb sy", options(nostack));
+        asm!("isb", options(nostack));
+    }
+}
+
+fn destroy_l1(l1_phys: usize) {
+    let l1 = unsafe { &mut *(l1_phys as *mut Table) };
+    for i1 in 0..ENTRIES {
+        let e1 = l1.0[i1];
+        if e1 & 1 == 0 {
+            continue;
+        }
+        if e1 & 0b10 == 0 {
+            // 1GB block — identity; do not free phys
+            l1.0[i1] = 0;
+            continue;
+        }
+        let l2_phys = (e1 & !0xfff) as usize;
+        destroy_l2(l2_phys);
+        frame::free_frame(l2_phys);
+        l1.0[i1] = 0;
+    }
+}
+
+fn destroy_l2(l2_phys: usize) {
+    let l2 = unsafe { &mut *(l2_phys as *mut Table) };
+    for i2 in 0..ENTRIES {
+        let e2 = l2.0[i2];
+        if e2 & 1 == 0 {
+            continue;
+        }
+        if e2 & 0b10 == 0 {
+            // 2MB identity block — do not free phys
+            l2.0[i2] = 0;
+            continue;
+        }
+        let l3_phys = (e2 & !0xfff) as usize;
+        destroy_l3(l3_phys);
+        frame::free_frame(l3_phys);
+        l2.0[i2] = 0;
+    }
+}
+
+fn destroy_l3(l3_phys: usize) {
+    let l3 = unsafe { &mut *(l3_phys as *mut Table) };
+    for i3 in 0..ENTRIES {
+        let e3 = l3.0[i3];
+        if e3 & 1 == 0 {
+            continue;
+        }
+        // Only free user-mapped pages (AP bits from ATTR_USER_*).
+        let ap = (e3 >> 6) & 0b11;
+        if ap == 1 || ap == 3 {
+            let page_pa = (e3 & 0x0000_FFFF_FFFF_F000) as usize;
+            frame::free_frame(page_pa);
+        }
+        l3.0[i3] = 0;
+    }
+}

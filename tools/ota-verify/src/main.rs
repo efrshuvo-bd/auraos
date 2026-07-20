@@ -1,7 +1,7 @@
-//! Host-side OTA manifest verify (Sprint 6 / SCRUM-31 / Sprint 8 SCRUM-41).
+//! Host-side OTA manifest verify (Sprint 6 / SCRUM-31 / Sprint 8–9).
 //!
-//! Rejects unsigned payloads. Accepts legacy `dev-signed` or `sha256-dev:<hex>`
-//! against the in-tree **dev** salt (not HSM / not ed25519 yet).
+//! Rejects unsigned payloads. Accepts legacy `dev-signed`, `sha256-dev:<hex>`,
+//! or soft `ed25519:<hex>` (dev pubkey via `shared::trust::SoftEd25519`; not HSM).
 //! See `ota/dev-keys/README.md` and `docs/updates-4y.md`.
 
 use anyhow::{Context, Result};
@@ -35,6 +35,9 @@ fn main() -> ExitCode {
     match ota::verify_manifest(&manifest) {
         Ok(()) => {
             let kind = match manifest.signature.as_deref() {
+                Some(s) if s.starts_with(ota::ED25519_SOFT_PREFIX) => {
+                    "ed25519 soft (software; not HSM)"
+                }
                 Some(s) if s.starts_with(ota::SHA256_DEV_PREFIX) => {
                     "sha256-dev digest (dev salt; not HSM)"
                 }
@@ -172,6 +175,12 @@ mod tests {
     #[test]
     fn fixture_accepts_sha256_dev_os() {
         let manifest = load_manifest(&fixture_path("signed-sha256-dev-os.json")).expect("load");
+        assert_eq!(verify_manifest(&manifest), Ok(()));
+    }
+
+    #[test]
+    fn fixture_accepts_ed25519_soft_os() {
+        let manifest = load_manifest(&fixture_path("signed-ed25519-soft-os.json")).expect("load");
         assert_eq!(verify_manifest(&manifest), Ok(()));
     }
 }

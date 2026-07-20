@@ -28,6 +28,7 @@ mod timer;
 mod trap;
 mod uart;
 mod userspace;
+mod vb;
 mod virtio;
 mod vm;
 
@@ -62,6 +63,7 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
     exceptions::init();
     virtio::init();
     virtio::init_block();
+    vb::init_stub_gate();
     ota::init();
     display::init();
     timer::init();

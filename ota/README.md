@@ -12,11 +12,14 @@ and a production-leaning verify path beyond the Sprint 6 stub.
 | `slots.json` | A/B slot state + rollback flags |
 | `apply_update.md` | Operator notes (inactive slot → reboot → rollback) |
 | `dev-keys/` | Dev trust-anchor placeholders (**not** production secrets) |
-| `fixtures/` | Sample manifests (signed / unsigned / `sha256-dev`) |
+| `fixtures/` | Sample manifests (signed / unsigned / `sha256-dev` / soft `ed25519`) |
 | `../shared/src/ota.rs` | Channel / slot / manifest types + host `verify_manifest` |
+| `../shared/src/trust.rs` | Soft ed25519 + HSM-deferred backend trait |
 | `../tools/ota-verify` | Host CLI wrapping shared verify (**reject unsigned**) |
 | `../kernel/src/ota_crypto.rs` | On-device `sha256-dev` verify (same digest algorithm) |
-| `../kernel/src/ota.rs` | Fail-closed verify → VirtIO-blk inactive-slot write |
+| `../kernel/src/ota.rs` | Fail-closed verify → VB stub gate → VirtIO-blk inactive-slot write |
+| `../kernel/src/vb.rs` | Boot-adjacent verified-boot stub (refuse/ok serial) |
+| `../docs/verified-boot.md` | Trust chain stages (stub vs production) |
 
 ## Channels
 
@@ -46,16 +49,19 @@ cargo test -p aura-ota-verify
 cargo run -p aura-ota-verify -- ota/fixtures/unsigned-os.json          # reject
 cargo run -p aura-ota-verify -- ota/fixtures/signed-agent.json         # ok (dev-signed)
 cargo run -p aura-ota-verify -- ota/fixtures/signed-sha256-dev-os.json # ok (digest)
+cargo run -p aura-ota-verify -- ota/fixtures/signed-ed25519-soft-os.json # ok (soft ed25519)
 ```
 
-Accepts legacy `dev-signed` **or** `sha256-dev:<hex>` (dev salt). HSM / ed25519 /
-verified boot remain roadmap — see `dev-keys/README.md` and `docs/updates-4y.md`.
+Accepts legacy `dev-signed`, `sha256-dev:<hex>` (dev salt), or soft `ed25519:<hex>`.
+HSM / silicon verified boot remain roadmap — see `dev-keys/README.md`,
+`docs/verified-boot.md`, and `docs/updates-4y.md`.
 
-## On-device verify + storage (Sprint 8 / SCRUM-41)
+## On-device verify + storage (Sprint 8–9)
 
 - Kernel runs the **same** `sha256-dev:` algorithm before any slot write:
   refuses unsigned, rejects a bad digest, accepts the boot-demo fixture fields.
 - Serial: `ota: verify: sha256-dev ok (on-device; not HSM / not VB / not ed25519)`.
+- Sprint 9 VB stub serial: `vb: stub refuse…` then `vb: stub trust ok…` before apply.
 - Then writes inactive sector + flips active on VirtIO-blk when present.
 - **Production still means:** HSM-backed ed25519 + verified boot chain — digests
-  with a tree-local salt are **dev/QEMU only**.
+  and soft software keys are **dev/QEMU only**.
