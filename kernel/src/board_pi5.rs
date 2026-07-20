@@ -1,4 +1,5 @@
-//! Board-specific notes for future Raspberry Pi 5 bring-up (Sprint 6 / SCRUM-30).
+//! Board-specific notes for future Raspberry Pi 5 bring-up (Sprint 6–10 /
+//! SCRUM-30 / SCRUM-46 / SCRUM-52).
 //!
 //! See `docs/hardware-port-pi5.md`.
 //!
@@ -20,11 +21,27 @@ pub const UART_DEBUG_LABEL: &str = "Pi 5 debug UART (3-pin / dedicated header �
 /// QEMU virt continues to use PL011 at `0x0900_0000`.
 pub const UART_MMIO_BASE_UNVERIFIED: Option<usize> = None;
 
+/// Sprint 10 research: expected DT path hint for RP1 UART (confirm on silicon DT).
+/// Not parsed by `fdt.rs` yet — documentation only.
+pub const UART_DT_NODE_HINT: &str = "RP1 serial@… under /rp1 (not QEMU PL011 @ 0x0900_0000)";
+
 /// Target CPU architecture for the port (same as QEMU virt).
 pub const ARCH: &str = "aarch64";
 
 /// Interrupt controller expectation (must be taken from Pi 5 DT, not virt defaults).
 pub const GIC_EXPECTATION: &str = "GICv2 or GICv3 per device tree — re-probe; do not reuse virt MMIO";
+
+/// QEMU virt GICv2 defaults (for contrast only — `gic.rs` hardcodes these today).
+pub const QEMU_GICD_BASE: usize = 0x0800_0000;
+pub const QEMU_GICC_BASE: usize = 0x0801_0000;
+
+/// Placeholder GIC distributor / CPU interface from DT — **unset** until GIC_FROM_DT.
+pub const GIC_DIST_BASE_UNVERIFIED: Option<usize> = None;
+pub const GIC_CPU_BASE_UNVERIFIED: Option<usize> = None;
+
+/// Sprint 10 research: next DT walk for GIC (not implemented).
+pub const GIC_DT_NODE_HINT: &str =
+    "interrupt-controller@… — read reg for distributor + CPU/redistributor; do not hardcode virt";
 
 /// Boot path note for packaging (not implemented).
 pub const BOOT_PATH_NOTE: &str =

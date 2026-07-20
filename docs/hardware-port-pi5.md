@@ -3,7 +3,8 @@
 Phase 5 / Sprint 6 bring-up target for AuraOS (Tier C research board → Tier A cloud agent).
 
 Jira: [SCRUM-30](https://auramislab.atlassian.net/browse/SCRUM-30) under epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12);
-Sprint 9 stretch [SCRUM-46](https://auramislab.atlassian.net/browse/SCRUM-46) under [SCRUM-43](https://auramislab.atlassian.net/browse/SCRUM-43).  
+Sprint 9 stretch [SCRUM-46](https://auramislab.atlassian.net/browse/SCRUM-46) under [SCRUM-43](https://auramislab.atlassian.net/browse/SCRUM-43);
+Sprint 10 [SCRUM-52](https://auramislab.atlassian.net/browse/SCRUM-52) under [SCRUM-48](https://auramislab.atlassian.net/browse/SCRUM-48).  
 In-tree board notes: `kernel/src/board_pi5.rs` (constants + feature flags only — **not** a working Pi 5 driver).  
 Linked from the [Development Plan](https://auramislab.atlassian.net/wiki/spaces/AuraOS/pages/295074) and [`docs/hardware.md`](hardware.md).
 
@@ -31,7 +32,7 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 | Step | Status | Notes |
 |------|--------|-------|
 | Document debug UART pinout / connector | Partial | See `board_pi5::UART_*` hints — verify against current Pi 5 docs before wiring |
-| Map PL011 (or SoC UART) MMIO base from DT | Partial (Sprint 9) | QEMU uses PL011 at `0x0900_0000`. Pi 5 debug console is typically on the **RP1** UART (not the BCM2712 PL011 at the QEMU virt address) — next step is confirm DT node (`serial@…` under RP1) and baud before coding `uart::init` for silicon |
+| Map PL011 (or SoC UART) MMIO base from DT | Partial (Sprint 9–10) | QEMU uses PL011 at `0x0900_0000`. Pi 5 debug console is typically on the **RP1** UART (not the BCM2712 PL011 at the QEMU virt address). Sprint 10: `board_pi5::UART_DT_NODE_HINT` records the expected `serial@…` under RP1 — still **not** parsed by `fdt.rs`; confirm baud + compatible string before coding `uart::init` for silicon |
 | Bring up `uart::init` against board MMIO | Deferred | Do **not** claim QEMU PL011 driver works on Pi 5 |
 | Print `AuraOS kernel online` on real hardware | Deferred | Milestone gate |
 
@@ -41,7 +42,7 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 |------|--------|-------|
 | Parse memory map from DT into `frame::init` | Open | QEMU hardcodes frame pool at `0x4400_0000` |
 | Adjust linker / load address for Pi image layout | Open | `boot/` + `kernel` linker script today assume QEMU virt |
-| Timer + GIC (or GICv3) bring-up | Open | Sprint 2 path is GICv2 + CNTP on virt; Pi 5 is GICv2/v3 in DT — must re-probe |
+| Timer + GIC (or GICv3) bring-up | Partial (Sprint 10 research) | QEMU `gic.rs` hardcodes GICv2 distributor `0x0800_0000` / CPU iface `0x0801_0000`. Pi must **not** reuse those — next concrete step is DT walk of `interrupt-controller@…` (`board_pi5::GIC_DT_NODE_HINT`); `GIC_FROM_DT` remains false; no fake silicon GIC driver |
 | Storage for A/B slots (`ota/slots.json` semantics) | Open | Needs SD/eMMC or VirtIO-blk equivalent — see OTA docs |
 | Network for cloud Agent Core + OTA | Later | Not required for first serial milestone |
 

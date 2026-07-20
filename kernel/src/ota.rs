@@ -1,9 +1,11 @@
-//! On-device OTA A/B apply (Sprint 6–9 — SCRUM-31 / SCRUM-36 / SCRUM-40 / SCRUM-41 / SCRUM-45).
+//! On-device OTA A/B apply (Sprint 6–10 — SCRUM-31 / 36 / 40 / 41 / 45 / 49 / 51).
 //!
 //! Sprint 8: real inactive-slot write via VirtIO-blk when the device is present,
 //! gated by an **on-device** `sha256-dev:` verify path (fail-closed). Host
 //! `aura-ota-verify` shares the same digest algorithm in `shared::ota`.
 //! Sprint 9: boot-adjacent VB stub (`vb::allow_activate`) must pass before apply.
+//! Sprint 10: on-device soft `ed25519:` accept/reject (same pubkey/canonical as host);
+//! ed25519 demo runs before apply so slot write is gated by soft crypto + VB stub.
 //! Production HSM / silicon verified boot remain roadmap — see
 //! `docs/updates-4y.md` and `docs/verified-boot.md`.
 
@@ -98,11 +100,37 @@ pub fn init() {
     match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_signed()) {
         Ok(()) => {
             console::println(
-                "ota: verify: sha256-dev ok (on-device; not HSM / not VB / not ed25519)",
+                "ota: verify: sha256-dev ok (on-device; not HSM / not VB)",
             );
         }
         Err(e) => {
             console::print("ota: verify: sha256-dev failed (");
+            log_verify_err(e);
+            console::println(") — A/B not applied");
+            return;
+        }
+    }
+
+    // Soft ed25519 reject then accept (SCRUM-49 / SCRUM-51) — same fixture as host.
+    match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_ed25519_bad()) {
+        Err(VerifyError::BadSignature) => {
+            console::println("ota: verify: rejected bad ed25519 (fail-closed)");
+        }
+        other => {
+            console::print("ota: verify: unexpected ed25519 bad-sig result (");
+            log_verify(other);
+            console::println(")");
+            return;
+        }
+    }
+    match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_ed25519()) {
+        Ok(()) => {
+            console::println(
+                "ota: verify: ed25519 soft ok (on-device; not HSM / not silicon VB)",
+            );
+        }
+        Err(e) => {
+            console::print("ota: verify: ed25519 soft failed (");
             log_verify_err(e);
             console::println(") — A/B not applied");
             return;
@@ -126,7 +154,9 @@ pub fn init() {
             console::print(" flipped active=");
             console::print(active.as_str());
             console::println(" (virtio-blk)");
-            console::println("ota: A/B slot write ok (unsigned/bad-sig still refused above)");
+            console::println(
+                "ota: A/B slot write ok (unsigned/bad-sig/ed25519 still refused above)",
+            );
         }
         Err(msg) => {
             console::print("ota: A/B write failed - ");
