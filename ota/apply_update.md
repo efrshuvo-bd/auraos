@@ -1,4 +1,4 @@
-# Applying an AuraOS slot update (skeleton)
+# Applying an AuraOS slot update
 
 Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 
@@ -6,7 +6,7 @@ Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 
 1. Download signed payload for channel (`os`, `agent`, or `models`).
 2. Verify signature against the device trust anchor  
-   (`cargo run -p aura-ota-verify -- <manifest.json>` on host; on-device later).
+   (`cargo run -p aura-ota-verify -- <manifest.json>` on host; on-device gate in kernel).
 3. **Reject** if unsigned or signature invalid — do not write any slot.
 4. Write payload into the **inactive** A/B slot.
 5. Mark inactive slot `bootable=true`, reboot.
@@ -27,22 +27,24 @@ Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 See `channels.json` and `README.md`. `models` is optional and must still be signed.
 Typed in code as `shared::ota::Channel` (`os` | `agent` | `models`).
 
-## On-device apply stub (SCRUM-36)
+## On-device apply (Sprint 8 / SCRUM-40)
 
-Boot serial shows an explicit stub path (distinct from “nothing logged”):
+Boot serial distinguishes refuse vs real write:
 
-- `ota: apply stub: active=A inactive=B - would switch A<->B`
-- `ota: apply stub: refused unsigned (host aura-ota-verify remains authority)`
-- `ota: A/B not applied (no crypto / no slot write)`
+- `ota: verify: refused unsigned (fail-closed before slot write)`
+- `ota: verify: boot-demo trust ok (dev key; not HSM / not VB)`
+- `ota: apply real: wrote inactive=B flipped active=B (virtio-blk)` (letters depend on prior active)
+- `ota: A/B slot write ok (unsigned still refused above)`
 
-Shared helper: `shared::ota::plan_apply_stub`. Host `aura-ota-verify` remains the
-authority for unsigned rejection. No inactive-slot write and no verified-boot claim.
+Disk: sector 0 `AURAAB` + active byte; sector 1 `INACTV` marker. Shared planner:
+`shared::ota::plan_apply_stub`. Host `aura-ota-verify` remains the fixture authority.
 
-## Production crypto (deferred)
+## Trust / crypto (SCRUM-41)
 
-The host stub accepts only the literal token `dev-signed`. That is **not** a
-shipping trust model. Before any on-device apply:
+Host accepts:
 
-1. Replace dev tokens with HSM-backed signatures under verified boot.
-2. Keep rejecting unsigned / bad signatures before any inactive-slot write.
-3. Align key rotation and EOS with [docs/updates-4y.md](../docs/updates-4y.md).
+- Legacy `dev-signed` token
+- `sha256-dev:<hex>` digest over canonical payload + **dev** salt (real accept/reject)
+
+**Not yet:** HSM-backed ed25519 or full verified boot. Roadmap in `docs/updates-4y.md`
+and `ota/dev-keys/README.md`.

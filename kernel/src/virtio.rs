@@ -6,8 +6,8 @@
 //! Console RX: polled drain remains available; Sprint 7 also registers the
 //! VirtIO-MMIO SPI with GICv2 and drains the RX used ring from the IRQ path.
 //!
-//! Block: minimal modern virtio-blk read of sector 0 for A/B slot experimentation
-//! (`scripts/prepare-ab-disk.ps1` + `run-qemu*.ps1`).
+//! Block: minimal modern virtio-blk read/write for A/B slot experimentation
+//! (`scripts/prepare-ab-disk.ps1` + `run-qemu*.ps1`). Sprint 8 adds OUT path.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering, fence};
 
@@ -25,6 +25,7 @@ const VIRTIO_ID_BLOCK: u32 = 2;
 const VIRTIO_MMIO_IRQ_BASE: u32 = 48;
 
 const VIRTIO_BLK_T_IN: u32 = 0;
+const VIRTIO_BLK_T_OUT: u32 = 1;
 const VIRTQ_DESC_F_NEXT: u16 = 1;
 const BLK_SECTOR_SIZE: usize = 512;
 
@@ -361,6 +362,20 @@ fn print_u32(mut v: u32) {
         v /= 10;
     }
     console::print(core::str::from_utf8(&buf[i..]).unwrap_or("?"));
+}
+
+fn print_hex_usize(v: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    console::print("0x");
+    let mut started = false;
+    for i in (0..16).rev() {
+        let nibble = ((v >> (i * 4)) & 0xf) as usize;
+        if nibble != 0 || started || i == 0 {
+            started = true;
+            let b = [HEX[nibble]];
+            crate::uart::write_bytes(&b);
+        }
+    }
 }
 
 fn setup_device(base: usize, version: u32) -> Result<(), ()> {
@@ -730,20 +745,38 @@ fn setup_block(base: usize, version: u32) -> Result<(), ()> {
     Ok(())
 }
 
-fn read_block_sector(sector: u64, out: &mut [u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
+/// Public sector size for A/B OTA helpers.
+pub const BLOCK_SECTOR_SIZE: usize = BLK_SECTOR_SIZE;
+
+/// Read one 512-byte sector from VirtIO-blk (when ready).
+pub fn read_block_sector(sector: u64, out: &mut [u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
     let dev = unsafe {
         match BLK.as_mut() {
             Some(d) => d,
             None => return Err(()),
         }
     };
-    unsafe { blk_read_one(dev, sector, out) }
+    unsafe { blk_xfer(dev, sector, out, true) }
 }
 
-unsafe fn blk_read_one(
+/// Write one 512-byte sector to VirtIO-blk (Sprint 8 / SCRUM-40).
+pub fn write_block_sector(sector: u64, data: &[u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
+    let mut buf = *data;
+    let dev = unsafe {
+        match BLK.as_mut() {
+            Some(d) => d,
+            None => return Err(()),
+        }
+    };
+    unsafe { blk_xfer(dev, sector, &mut buf, false) }
+}
+
+/// `is_read == true` → IN (device fills `buf`); `false` → OUT (device reads `buf`).
+unsafe fn blk_xfer(
     dev: &mut BlkDev,
     sector: u64,
-    out: &mut [u8; BLK_SECTOR_SIZE],
+    buf: &mut [u8; BLK_SECTOR_SIZE],
+    is_read: bool,
 ) -> Result<(), ()> {
     // Layout in req_page: BlkReq (16) | data (512) | status (1)
     let req_off = 0usize;
@@ -754,12 +787,24 @@ unsafe fn blk_read_one(
     }
 
     let req = BlkReq {
-        type_: VIRTIO_BLK_T_IN,
+        type_: if is_read {
+            VIRTIO_BLK_T_IN
+        } else {
+            VIRTIO_BLK_T_OUT
+        },
         reserved: 0,
         sector,
     };
     core::ptr::write_volatile((dev.req_page + req_off) as *mut BlkReq, req);
-    core::ptr::write_bytes((dev.req_page + data_off) as *mut u8, 0, BLK_SECTOR_SIZE);
+    if is_read {
+        core::ptr::write_bytes((dev.req_page + data_off) as *mut u8, 0, BLK_SECTOR_SIZE);
+    } else {
+        core::ptr::copy_nonoverlapping(
+            buf.as_ptr(),
+            (dev.req_page + data_off) as *mut u8,
+            BLK_SECTOR_SIZE,
+        );
+    }
     core::ptr::write_volatile((dev.req_page + status_off) as *mut u8, 0xff);
 
     let desc = dev.q.desc as *mut VirtqDesc;
@@ -768,10 +813,14 @@ unsafe fn blk_read_one(
     (*desc.add(0)).len = core::mem::size_of::<BlkReq>() as u32;
     (*desc.add(0)).flags = VIRTQ_DESC_F_NEXT;
     (*desc.add(0)).next = 1;
-    // desc 1: data (device-writable)
+    // desc 1: data — WRITE for reads (device fills), device-readable for writes
     (*desc.add(1)).addr = (dev.req_page + data_off) as u64;
     (*desc.add(1)).len = BLK_SECTOR_SIZE as u32;
-    (*desc.add(1)).flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    (*desc.add(1)).flags = if is_read {
+        VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE
+    } else {
+        VIRTQ_DESC_F_NEXT
+    };
     (*desc.add(1)).next = 2;
     // desc 2: status (device-writable)
     (*desc.add(2)).addr = (dev.req_page + status_off) as u64;
@@ -810,10 +859,293 @@ unsafe fn blk_read_one(
     if status != 0 {
         return Err(());
     }
-    core::ptr::copy_nonoverlapping(
-        (dev.req_page + data_off) as *const u8,
-        out.as_mut_ptr(),
-        BLK_SECTOR_SIZE,
+    if is_read {
+        core::ptr::copy_nonoverlapping(
+            (dev.req_page + data_off) as *const u8,
+            buf.as_mut_ptr(),
+            BLK_SECTOR_SIZE,
+        );
+    }
+    Ok(())
+}
+
+// --- VirtIO-GPU 2D scanout (SCRUM-42) ---------------------------------------
+
+const VIRTIO_ID_GPU: u32 = 16;
+
+const GPU_CMD_RESOURCE_CREATE_2D: u32 = 0x0101;
+const GPU_CMD_SET_SCANOUT: u32 = 0x0103;
+const GPU_CMD_RESOURCE_FLUSH: u32 = 0x0104;
+const GPU_CMD_TRANSFER_TO_HOST_2D: u32 = 0x0105;
+const GPU_CMD_RESOURCE_ATTACH_BACKING: u32 = 0x0106;
+const GPU_RESP_OK_NODATA: u32 = 0x1100;
+
+/// VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM
+const GPU_FORMAT_R8G8B8A8: u32 = 67;
+const GPU_RESOURCE_ID: u32 = 1;
+const GPU_SCANOUT_ID: u32 = 0;
+
+/// Modest smoke resolution (visible under `-VirtioGpu`; ramfb stays default path).
+const GPU_WIDTH: u32 = 640;
+const GPU_HEIGHT: u32 = 480;
+const GPU_BPP: u32 = 4;
+const GPU_FB_BYTES: usize = (GPU_WIDTH * GPU_HEIGHT * GPU_BPP) as usize;
+
+/// Solid fill: R=0xC0 G=0x40 B=0x20 A=0xFF (distinct from ramfb teal).
+const GPU_SMOKE_PIXEL: u32 = 0xFF20_40C0;
+
+struct GpuDev {
+    base: usize,
+    q: QueuePages,
+    cmd_page: usize,
+    avail_idx: u16,
+    used_idx: u16,
+}
+
+static mut GPU: Option<GpuDev> = None;
+
+/// Negotiate VirtIO-GPU, arm control queue, create 2D resource, SET_SCANOUT,
+/// transfer + flush a solid-fill framebuffer (SCRUM-42).
+///
+/// Returns `Ok(())` when the host accepted the flush. Callers keep ramfb as the
+/// default visible path when this device is absent.
+pub fn init_gpu_scanout() -> Result<(), &'static str> {
+    let Some((base, version, _slot)) = find_device_slot(VIRTIO_ID_GPU) else {
+        return Err("no device");
+    };
+    unsafe {
+        w32(base, REG_STATUS, 0);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER);
+
+        w32(base, REG_DEVICE_FEATURES_SEL, 0);
+        let _h0 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DEVICE_FEATURES_SEL, 1);
+        let _h1 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DRIVER_FEATURES_SEL, 0);
+        w32(base, REG_DRIVER_FEATURES, 0);
+        w32(base, REG_DRIVER_FEATURES_SEL, 1);
+        w32(base, REG_DRIVER_FEATURES, 0);
+
+        if version >= 2 {
+            w32(
+                base,
+                REG_STATUS,
+                STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
+            );
+            let st = r32(base, REG_STATUS);
+            if (st & STATUS_FEATURES_OK) == 0 {
+                return Err("features rejected");
+            }
+        }
+        if version == 1 {
+            w32(base, REG_GUEST_PAGE_SIZE, frame::PAGE_SIZE as u32);
+        }
+
+        let q = alloc_queue(version).map_err(|_| "queue alloc")?;
+        let cmd_page = frame::alloc_frame().ok_or("cmd page")?;
+        setup_queue(base, version, 0, &q).map_err(|_| "queue setup")?;
+
+        let mut st = STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_DRIVER_OK;
+        if version >= 2 {
+            st |= STATUS_FEATURES_OK;
+        }
+        w32(base, REG_STATUS, st);
+
+        GPU = Some(GpuDev {
+            base,
+            q,
+            cmd_page,
+            avail_idx: 0,
+            used_idx: 0,
+        });
+    }
+
+    let pages = (GPU_FB_BYTES + frame::PAGE_SIZE - 1) / frame::PAGE_SIZE;
+    let fb = alloc_contig(pages).ok_or("fb alloc")?;
+    gpu_paint_smoke(fb);
+
+    gpu_resource_create_2d()?;
+    gpu_attach_backing(fb, GPU_FB_BYTES as u32)?;
+    gpu_set_scanout()?;
+    gpu_transfer_to_host()?;
+    gpu_resource_flush()?;
+
+    console::print("display: virtio-gpu scanout ");
+    print_u32(GPU_WIDTH);
+    console::print("x");
+    print_u32(GPU_HEIGHT);
+    console::print(" @ ");
+    print_hex_usize(fb);
+    console::println(" (resource+flush; kernel EL1)");
+    Ok(())
+}
+
+/// Backward-compatible name used by earlier Sprint 8 docs.
+pub fn init_gpu_control_queue() -> Result<(), ()> {
+    init_gpu_scanout().map_err(|_| ())
+}
+
+fn gpu_paint_smoke(fb: usize) {
+    unsafe {
+        let px = fb as *mut u32;
+        let n = (GPU_WIDTH * GPU_HEIGHT) as usize;
+        for i in 0..n {
+            // Diagonal stripe so a blank/wrong format is obvious.
+            let x = (i as u32) % GPU_WIDTH;
+            let y = (i as u32) / GPU_WIDTH;
+            let color = if ((x / 32) + (y / 32)) % 2 == 0 {
+                GPU_SMOKE_PIXEL
+            } else {
+                0xFF10_1830
+            };
+            core::ptr::write_volatile(px.add(i), color);
+        }
+    }
+}
+
+fn gpu_resource_create_2d() -> Result<(), &'static str> {
+    let mut req = [0u8; 24 + 16];
+    write_gpu_hdr(&mut req[0..24], GPU_CMD_RESOURCE_CREATE_2D);
+    write_u32_le(&mut req[24..28], GPU_RESOURCE_ID);
+    write_u32_le(&mut req[28..32], GPU_FORMAT_R8G8B8A8);
+    write_u32_le(&mut req[32..36], GPU_WIDTH);
+    write_u32_le(&mut req[36..40], GPU_HEIGHT);
+    gpu_submit(&req[..40]).map_err(|_| "RESOURCE_CREATE_2D")
+}
+
+fn gpu_attach_backing(fb: usize, len: u32) -> Result<(), &'static str> {
+    // hdr(24) + resource_id + nr_entries + mem_entry(16)
+    let mut req = [0u8; 24 + 8 + 16];
+    write_gpu_hdr(&mut req[0..24], GPU_CMD_RESOURCE_ATTACH_BACKING);
+    write_u32_le(&mut req[24..28], GPU_RESOURCE_ID);
+    write_u32_le(&mut req[28..32], 1); // nr_entries
+    write_u64_le(&mut req[32..40], fb as u64);
+    write_u32_le(&mut req[40..44], len);
+    write_u32_le(&mut req[44..48], 0);
+    gpu_submit(&req[..48]).map_err(|_| "ATTACH_BACKING")
+}
+
+fn gpu_set_scanout() -> Result<(), &'static str> {
+    // hdr(24) + rect(16) + scanout_id + resource_id
+    let mut req = [0u8; 24 + 16 + 8];
+    write_gpu_hdr(&mut req[0..24], GPU_CMD_SET_SCANOUT);
+    write_u32_le(&mut req[24..28], 0); // x
+    write_u32_le(&mut req[28..32], 0); // y
+    write_u32_le(&mut req[32..36], GPU_WIDTH);
+    write_u32_le(&mut req[36..40], GPU_HEIGHT);
+    write_u32_le(&mut req[40..44], GPU_SCANOUT_ID);
+    write_u32_le(&mut req[44..48], GPU_RESOURCE_ID);
+    gpu_submit(&req[..48]).map_err(|_| "SET_SCANOUT")
+}
+
+fn gpu_transfer_to_host() -> Result<(), &'static str> {
+    // hdr(24) + rect(16) + offset(8) + resource_id + padding
+    let mut req = [0u8; 24 + 16 + 8 + 8];
+    write_gpu_hdr(&mut req[0..24], GPU_CMD_TRANSFER_TO_HOST_2D);
+    write_u32_le(&mut req[24..28], 0);
+    write_u32_le(&mut req[28..32], 0);
+    write_u32_le(&mut req[32..36], GPU_WIDTH);
+    write_u32_le(&mut req[36..40], GPU_HEIGHT);
+    write_u64_le(&mut req[40..48], 0);
+    write_u32_le(&mut req[48..52], GPU_RESOURCE_ID);
+    write_u32_le(&mut req[52..56], 0);
+    gpu_submit(&req[..56]).map_err(|_| "TRANSFER_TO_HOST_2D")
+}
+
+fn gpu_resource_flush() -> Result<(), &'static str> {
+    let mut req = [0u8; 24 + 16 + 8];
+    write_gpu_hdr(&mut req[0..24], GPU_CMD_RESOURCE_FLUSH);
+    write_u32_le(&mut req[24..28], 0);
+    write_u32_le(&mut req[28..32], 0);
+    write_u32_le(&mut req[32..36], GPU_WIDTH);
+    write_u32_le(&mut req[36..40], GPU_HEIGHT);
+    write_u32_le(&mut req[40..44], GPU_RESOURCE_ID);
+    write_u32_le(&mut req[44..48], 0);
+    gpu_submit(&req[..48]).map_err(|_| "RESOURCE_FLUSH")
+}
+
+fn write_gpu_hdr(buf: &mut [u8], type_: u32) {
+    write_u32_le(&mut buf[0..4], type_);
+    write_u32_le(&mut buf[4..8], 0); // flags
+    write_u64_le(&mut buf[8..16], 0); // fence_id
+    write_u32_le(&mut buf[16..20], 0); // ctx_id
+    write_u32_le(&mut buf[20..24], 0); // ring_idx + pad
+}
+
+fn write_u32_le(buf: &mut [u8], v: u32) {
+    buf.copy_from_slice(&v.to_le_bytes());
+}
+
+fn write_u64_le(buf: &mut [u8], v: u64) {
+    buf.copy_from_slice(&v.to_le_bytes());
+}
+
+fn gpu_submit(req: &[u8]) -> Result<(), ()> {
+    let dev = unsafe {
+        match GPU.as_mut() {
+            Some(d) => d,
+            None => return Err(()),
+        }
+    };
+    unsafe { gpu_submit_inner(dev, req) }
+}
+
+unsafe fn gpu_submit_inner(dev: &mut GpuDev, req: &[u8]) -> Result<(), ()> {
+    const RESP_OFF: usize = 512;
+    const RESP_LEN: usize = 24;
+    if req.len() > RESP_OFF || RESP_OFF + RESP_LEN > frame::PAGE_SIZE {
+        return Err(());
+    }
+
+    core::ptr::write_bytes(dev.cmd_page as *mut u8, 0, frame::PAGE_SIZE);
+    core::ptr::copy_nonoverlapping(req.as_ptr(), dev.cmd_page as *mut u8, req.len());
+    // Device fills response type; seed with unspec error so a no-op is visible.
+    write_u32_le(
+        core::slice::from_raw_parts_mut((dev.cmd_page + RESP_OFF) as *mut u8, 4),
+        0x1200,
     );
+
+    let desc = dev.q.desc as *mut VirtqDesc;
+    (*desc.add(0)).addr = dev.cmd_page as u64;
+    (*desc.add(0)).len = req.len() as u32;
+    (*desc.add(0)).flags = VIRTQ_DESC_F_NEXT;
+    (*desc.add(0)).next = 1;
+    (*desc.add(1)).addr = (dev.cmd_page + RESP_OFF) as u64;
+    (*desc.add(1)).len = RESP_LEN as u32;
+    (*desc.add(1)).flags = VIRTQ_DESC_F_WRITE;
+    (*desc.add(1)).next = 0;
+
+    let avail = dev.q.avail as *mut VirtqAvail;
+    let a_slot = (dev.avail_idx as usize) % QUEUE_SIZE;
+    (*avail).ring[a_slot] = 0;
+    fence(Ordering::SeqCst);
+    dev.avail_idx = dev.avail_idx.wrapping_add(1);
+    (*avail).idx = dev.avail_idx;
+    fence(Ordering::SeqCst);
+
+    w32(dev.base, REG_QUEUE_SEL, 0);
+    w32(dev.base, REG_QUEUE_NOTIFY, 0);
+
+    let used = dev.q.used as *const VirtqUsed;
+    let mut ok = false;
+    for _ in 0..2_000_000 {
+        fence(Ordering::SeqCst);
+        if (*used).idx != dev.used_idx {
+            dev.used_idx = (*used).idx;
+            ok = true;
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    ack_irq(dev.base);
+    if !ok {
+        return Err(());
+    }
+
+    let resp_type = core::ptr::read_volatile((dev.cmd_page + RESP_OFF) as *const u32);
+    if resp_type != GPU_RESP_OK_NODATA {
+        return Err(());
+    }
     Ok(())
 }
