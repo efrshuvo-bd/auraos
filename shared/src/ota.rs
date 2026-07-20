@@ -6,8 +6,10 @@
 //! - Accept production-leaning `sha256-dev:<hex>` over a canonical payload
 //!   (real digest check; **dev** salt only — not HSM / not ed25519 yet).
 //!
-//! Full ed25519 + HSM + verified boot remain the roadmap in `docs/updates-4y.md`
-//! (heavy crypto crates currently blocked on some Windows WDAC hosts).
+//! On-device / boot-adjacent verify lives in `kernel/src/ota_crypto.rs` and uses
+//! the **same** SHA-256 + salt + canonical form (keep in sync). Full ed25519 +
+//! HSM + verified boot remain the roadmap in `docs/updates-4y.md` (heavy crypto
+//! crates currently blocked on some Windows WDAC hosts).
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,7 +21,7 @@ pub const DEV_SIGNATURE: &str = "dev-signed";
 pub const SHA256_DEV_PREFIX: &str = "sha256-dev:";
 
 /// Dev-only salt mixed into the digest (clearly not an HSM secret).
-const DEV_DIGEST_SALT: &[u8] = b"AuraOS-ota-dev-salt-v1-NOT-HSM";
+pub const DEV_DIGEST_SALT: &[u8] = b"AuraOS-ota-dev-salt-v1-NOT-HSM";
 
 /// Canonical bytes digested for `sha256-dev:` signatures.
 pub fn canonical_sign_bytes(m: &UpdateManifest) -> Vec<u8> {
@@ -213,7 +215,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 /// Minimal SHA-256 (FIPS 180-4) — no external crypto crates (WDAC-friendly).
-fn sha256(message: &[u8]) -> [u8; 32] {
+/// Also mirrored in `kernel/src/ota_crypto.rs` for on-device verify.
+pub fn sha256(message: &[u8]) -> [u8; 32] {
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,

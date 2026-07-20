@@ -1,11 +1,13 @@
 //! On-device OTA A/B apply (Sprint 6–8 — SCRUM-31 / SCRUM-36 / SCRUM-40 / SCRUM-41).
 //!
 //! Sprint 8: real inactive-slot write via VirtIO-blk when the device is present,
-//! gated by an on-device verify API (dev-signed + ed25519 path on host; kernel
-//! refuse-unsigned before write). Production HSM / full verified boot remain
-//! documented roadmap — see `docs/updates-4y.md`.
+//! gated by an **on-device** `sha256-dev:` verify path (fail-closed). Host
+//! `aura-ota-verify` shares the same digest algorithm in `shared::ota`.
+//! Production HSM / ed25519 / full verified boot remain roadmap — see
+//! `docs/updates-4y.md`.
 
 use crate::console;
+use crate::ota_crypto::{self, ManifestView, VerifyError};
 use crate::virtio;
 
 /// Channels from the 4-year update contract (`ota/channels.json`).
@@ -55,7 +57,7 @@ impl Slot {
     }
 }
 
-/// Boot-time OTA: refuse unsigned, then (when blk ready) write inactive slot.
+/// Boot-time OTA: on-device verify (fail-closed), then (when blk ready) write inactive slot.
 pub fn init() {
     console::print("ota: channels=");
     for (i, ch) in CHANNELS.iter().enumerate() {
@@ -66,16 +68,44 @@ pub fn init() {
     }
     console::println(" (A/B metadata in ota/; apply path Sprint 8)");
 
-    // Always demonstrate fail-closed unsigned path (no write).
-    console::println("ota: verify: refused unsigned (fail-closed before slot write)");
-
-    // On-device gate: accept explicit boot-demo trust token (mirrors host
-    // `dev-signed` / ed25519 accept path). Not HSM-backed — see updates-4y.md.
-    if !on_device_trust_ok(true) {
-        console::println("ota: A/B not applied (trust gate closed)");
-        return;
+    // Demonstrate fail-closed paths before any slot write.
+    match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_unsigned()) {
+        Err(VerifyError::Unsigned) => {
+            console::println("ota: verify: refused unsigned (fail-closed before slot write)");
+        }
+        other => {
+            console::print("ota: verify: unexpected unsigned result (");
+            log_verify(other);
+            console::println(")");
+            return;
+        }
     }
-    console::println("ota: verify: boot-demo trust ok (dev key; not HSM / not VB)");
+    match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_bad_sig()) {
+        Err(VerifyError::BadSignature) => {
+            console::println("ota: verify: rejected bad sha256-dev (fail-closed)");
+        }
+        other => {
+            console::print("ota: verify: unexpected bad-sig result (");
+            log_verify(other);
+            console::println(")");
+            return;
+        }
+    }
+
+    // Accept path: boot-demo manifest matching ota/fixtures/signed-sha256-dev-os.json.
+    match ota_crypto::verify_manifest_view(&ManifestView::boot_demo_signed()) {
+        Ok(()) => {
+            console::println(
+                "ota: verify: sha256-dev ok (on-device; not HSM / not VB / not ed25519)",
+            );
+        }
+        Err(e) => {
+            console::print("ota: verify: sha256-dev failed (");
+            log_verify_err(e);
+            console::println(") — A/B not applied");
+            return;
+        }
+    }
 
     if !virtio::block_ready() {
         console::println("ota: A/B not applied (no virtio-blk for slot write)");
@@ -89,7 +119,7 @@ pub fn init() {
             console::print(" flipped active=");
             console::print(active.as_str());
             console::println(" (virtio-blk)");
-            console::println("ota: A/B slot write ok (unsigned still refused above)");
+            console::println("ota: A/B slot write ok (unsigned/bad-sig still refused above)");
         }
         Err(msg) => {
             console::print("ota: A/B write failed - ");
@@ -98,10 +128,19 @@ pub fn init() {
     }
 }
 
-/// Kernel-side trust gate (SCRUM-41). Host does real ed25519; here we only
-/// accept an explicit signed=true boot path and always refuse unsigned.
-fn on_device_trust_ok(signed: bool) -> bool {
-    signed
+fn log_verify(r: Result<(), VerifyError>) {
+    match r {
+        Ok(()) => console::print("ok"),
+        Err(e) => log_verify_err(e),
+    }
+}
+
+fn log_verify_err(e: VerifyError) {
+    match e {
+        VerifyError::Unsigned => console::print("unsigned"),
+        VerifyError::BadSignature => console::print("bad-sig"),
+        VerifyError::UnknownChannel => console::print("unknown-channel"),
+    }
 }
 
 fn apply_inactive_slot_write() -> Result<(Slot, Slot), &'static str> {

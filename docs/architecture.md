@@ -84,7 +84,7 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 ## Phase 4 notes (Sprint 5)
 
 - **Always-on agent UI:** guest shell prints a Home + Agent status/prompt panel on serial and invokes `help` / `system_status` from that UI path; host `aura-shell` keeps the richer REPL + 480×800 PPM sketch (`framebuffer.rs`).
-- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) when present and, when `etc/ramfb` exists, DMA-writes a 28-byte big-endian `RAMFBCfg` (addr/fourcc/flags/w/h/stride) via fw_cfg, then paints a 480×800 XRGB8888 smoke surface (Home/Agent labels use an 8×8 bitmap font at 2× scale). DATA-register fw_cfg stores do not activate ramfb. VirtIO-GPU queues / scanout are deferred. GUI default is ramfb-only; `-VirtioGpu` may show QEMU's uninitialized-GPU placeholder until scanout exists.
+- **Display:** kernel `display::init` probes VirtIO-GPU (device id 16) when present and, when `etc/ramfb` exists, DMA-writes a 28-byte big-endian `RAMFBCfg` (addr/fourcc/flags/w/h/stride) via fw_cfg, then paints a 480×800 XRGB8888 smoke surface (Home/Agent labels use an 8×8 bitmap font at 2× scale). DATA-register fw_cfg stores do not activate ramfb. With `-VirtioGpu`, kernel EL1 also runs VirtIO-GPU control-queue scanout (resource create / SET_SCANOUT / transfer / flush, 640×480 checkerboard). GUI default remains ramfb-only.
 - **Host display backend:** on Windows, prefer QEMU `-display gtk` (Scoop SDL often hangs at host bring-up with no guest serial). GTK pixbuf/Adwaita warnings are cosmetic. Success = visible smoke paint + serial `ramfb smoke ok`. Override with `-DisplayBackend gtk|sdl|default`.
 - **QEMU flags:** documented in `scripts/run-qemu-gui.ps1` (gui) and `scripts/run-qemu.ps1` (headless).
 

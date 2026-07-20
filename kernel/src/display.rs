@@ -1,12 +1,13 @@
-//! Display foundations: VirtIO-GPU control queue + QEMU ramfb smoke test.
+//! Display foundations: VirtIO-GPU scanout + QEMU ramfb smoke test.
 //!
 //! Sprint 5 (SCRUM-29): scan VirtIO-MMIO for GPU (device id 16), and when QEMU
 //! exposes `etc/ramfb` via fw_cfg, map a 480×800 XRGB8888 surface, solid-fill,
 //! and draw a few text glyphs (matches host `userspace/shell` visual contract).
 //!
-//! Sprint 8 (SCRUM-42): when a VirtIO-GPU device is present, negotiate and arm
-//! the **control queue** (beyond probe-only). Resource create / SET_SCANOUT /
-//! flush are still deferred — **ramfb remains the visible fallback**.
+//! Sprint 8 (SCRUM-42): when a VirtIO-GPU device is present, negotiate the
+//! **control queue**, create a 2D resource, SET_SCANOUT, transfer + flush a
+//! checkerboard solid-fill (kernel EL1). **ramfb remains the default visible
+//! path** for `run-qemu-gui.ps1` without `-VirtioGpu`.
 //!
 //! Ramfb is activated only by a fw_cfg **DMA write** of `RAMFBCfg` to `etc/ramfb`.
 //! Byte stores to the fw_cfg DATA register are ignored (QEMU ≥ 2.4); without DMA
@@ -80,13 +81,15 @@ fn probe_virtio_gpu() {
                 _ => "?",
             });
             console::println("");
-            match virtio::init_gpu_control_queue() {
+            match virtio::init_gpu_scanout() {
                 Ok(()) => console::println(
-                    "display: virtio-gpu control queue ready (scanout deferred; ramfb fallback)",
+                    "display: virtio-gpu scanout ok (checkerboard fill; ramfb still fallback)",
                 ),
-                Err(()) => console::println(
-                    "display: virtio-gpu queue setup failed (ramfb remains fallback)",
-                ),
+                Err(msg) => {
+                    console::print("display: virtio-gpu scanout failed - ");
+                    console::println(msg);
+                    console::println("display: ramfb remains fallback");
+                }
             }
         }
         None => console::println("display: no virtio-gpu device"),

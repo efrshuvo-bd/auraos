@@ -9,10 +9,9 @@
 # Display path (Sprint 5 / SCRUM-29):
 #   -device ramfb                         → fw_cfg "etc/ramfb"; kernel DMA-writes RAMFBCfg
 #   -display gtk|sdl|default              → host window shows the ramfb surface
-#   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16) probe
-#                                           (off by default: uninitialized virtio-gpu would
-#                                           steal the window with "Guest has not initialized
-#                                           the display (yet)" until queues/scanout exist)
+#   -VirtioGpu                            → optional VirtIO-MMIO GPU (device id 16)
+#                                           scanout: resource create + SET_SCANOUT + flush
+#                                           (off by default; ramfb remains the default visible path)
 #
 # Windows / Scoop QEMU host notes:
 #   - SDL often hangs during host display bring-up (black window flash / no guest serial).
