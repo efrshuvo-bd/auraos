@@ -15,6 +15,8 @@ const VIRTIO_MMIO_BASE: usize = 0x0a00_0000;
 const VIRTIO_MMIO_STRIDE: usize = 0x200;
 const VIRTIO_MAGIC: u32 = 0x7472_6976; // "virt"
 const VIRTIO_ID_CONSOLE: u32 = 3;
+/// VirtIO block device id — needed later for A/B slot storage (not driven yet).
+const VIRTIO_ID_BLOCK: u32 = 2;
 
 const REG_MAGIC: usize = 0x000;
 const REG_VERSION: usize = 0x004;
@@ -158,6 +160,30 @@ pub fn init() {
 
 pub fn is_ready() -> bool {
     READY.load(Ordering::Acquire)
+}
+
+/// Probe-only VirtIO-blk presence log for future A/B storage.
+///
+/// Does **not** negotiate queues or claim a working block driver. Default QEMU
+/// runs usually have no virtio-blk; when one is added later, this line confirms
+/// discovery before a real driver lands.
+pub fn probe_block_stub() {
+    match find_device(VIRTIO_ID_BLOCK) {
+        Some((_base, version)) => {
+            console::print("virtio: blk probe ok version=");
+            console::print(match version {
+                1 => "1 (legacy)",
+                2 => "2 (modern)",
+                _ => "?",
+            });
+            console::println(" (stub only; A/B storage not applied)");
+        }
+        None => {
+            console::println(
+                "virtio: no blk device (A/B storage design: see docs/updates-4y.md + ota/)",
+            );
+        }
+    }
 }
 
 /// Write bytes to VirtIO console TX. Returns false if VirtIO is unavailable.

@@ -108,6 +108,16 @@ name = "aura-kernel"
 version = "0.1.0"
 
 [[package]]
+name = "aura-ota-verify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "shared",
+]
+
+[[package]]
 name = "aura-shell"
 version = "0.1.0"
 dependencies = [

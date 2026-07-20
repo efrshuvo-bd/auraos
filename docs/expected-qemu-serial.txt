@@ -27,6 +27,7 @@
 # preempt several times; up to 3 `sched: preempt pid=…` lines are logged.
 
 AuraOS kernel online
+board: qemu-virt (pi5 research stubs present; not a hardware driver)
 phase1: uart + panic + frame allocator
 boot: initrd range from FDT /chosen
 phase2: heap + frame allocator ready
@@ -36,6 +37,9 @@ exception: VBAR_EL1 installed (SVC+IRQ)
 virtio: console at mmio version=2 (modern)
 virtio: console TX/RX ready (RX polled; IRQ deferred)
 virtio: RX poll ok (empty)
+virtio: no blk device (A/B storage design: see docs/updates-4y.md + ota/)
+ota: channels=os,agent,models (A/B metadata in ota/; apply deferred)
+ota: A/B not applied
 display: no virtio-gpu device
 display: ramfb skip - no etc/ramfb (use run-qemu-gui.ps1)
 gic: v2 ready (CNTP PPI 30)

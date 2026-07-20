@@ -1,10 +1,37 @@
 # Applying an AuraOS slot update (skeleton)
 
-1. Download signed payload for channel (`os`, `agent`, or `models`).
-2. Verify signature against the device trust anchor.
-3. Write payload into the **inactive** A/B slot.
-4. Mark inactive slot `bootable=true`, reboot.
-5. On success, set `successful_boot=true` and flip `active`.
-6. On failure, bootloader rolls back to previous slot.
+Aligns with [docs/updates-4y.md](../docs/updates-4y.md) and `slots.json`.
 
-Agent-only updates may hot-restart `agent.core` without flipping OS slots when the tool ABI is unchanged.
+## Happy path
+
+1. Download signed payload for channel (`os`, `agent`, or `models`).
+2. Verify signature against the device trust anchor  
+   (`cargo run -p aura-ota-verify -- <manifest.json>` on host; on-device later).
+3. **Reject** if unsigned or signature invalid — do not write any slot.
+4. Write payload into the **inactive** A/B slot.
+5. Mark inactive slot `bootable=true`, reboot.
+6. On success, set `successful_boot=true` and flip `active`.
+
+## Rollback story
+
+- `slots.json` sets `rollback_on_failure: true`.
+- If the newly booted slot fails health checks (no `successful_boot` within the
+  bootloader’s try count), the bootloader marks that slot `bootable=false` and
+  reboots the previous `active` slot.
+- Agent-only updates may hot-restart `agent.core` without flipping OS slots when
+  the tool ABI is unchanged; failed agent restart should leave the last known
+  good agent binary in place (no half-written active slot).
+
+## Channels
+
+See `channels.json` and `README.md`. `models` is optional and must still be signed.
+Typed in code as `shared::ota::Channel` (`os` | `agent` | `models`).
+
+## Production crypto (deferred)
+
+The host stub accepts only the literal token `dev-signed`. That is **not** a
+shipping trust model. Before any on-device apply:
+
+1. Replace dev tokens with HSM-backed signatures under verified boot.
+2. Keep rejecting unsigned / bad signatures before any inactive-slot write.
+3. Align key rotation and EOS with [docs/updates-4y.md](../docs/updates-4y.md).

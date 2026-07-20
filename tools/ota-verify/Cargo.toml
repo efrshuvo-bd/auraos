@@ -1,0 +1,16 @@
+[package]
+name = "aura-ota-verify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Host-side AuraOS OTA manifest verify stub (reject unsigned)"
+
+[[bin]]
+name = "aura-ota-verify"
+path = "src/main.rs"
+
+[dependencies]
+shared = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

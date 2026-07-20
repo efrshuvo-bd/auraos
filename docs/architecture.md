@@ -2,7 +2,7 @@
 
 AuraOS is a research **agentic mobile OS**: boot → kernel → `init` → **Agent Core** (required) → shell/apps.
 
-Tracks `devel` through Sprint 5 (mobile shell / display foundations). Sprint 1 = VirtIO console; Sprint 2 = GICv2 + CNTP preempt; Sprint 3 = initrd guests; Sprint 4 = EL0 Agent Core; Sprint 5 = ramfb / VirtIO-GPU probe + agent UI surface.
+Tracks `devel` through Sprint 6 (board bring-up research + OTA A/B skeleton). Sprint 1 = VirtIO console; Sprint 2 = GICv2 + CNTP preempt; Sprint 3 = initrd guests; Sprint 4 = EL0 Agent Core; Sprint 5 = ramfb / VirtIO-GPU probe + agent UI surface; Sprint 6 = Pi 5 checklist + OTA verify stub ([SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12)).
 
 ## Layers
 
@@ -11,7 +11,7 @@ Tracks `devel` through Sprint 5 (mobile shell / display foundations). Sprint 1 =
 3. **Userspace**
    - **Guest EL0** (`userspace/guest`) — `guest-init` / `guest-agent` / `guest-shell` packed into `build/initrd.cpio` by `scripts/pack-initrd.ps1` (not embedded in the kernel image). Shell presents a serial Home + Agent overlay and triggers tools over IPC.
    - **Host demos** — `aura-init` / `aura-agent` / `aura-shell` (Tokio + TCP); PPM framebuffer sketch in `userspace/shell` is the visual contract for Phase 4.
-4. **Shared** — length-prefixed JSON IPC + tool schemas (host path).
+4. **Shared** — length-prefixed JSON IPC + tool schemas + OTA channel/manifest types (host path).
 
 ## Bring-up sequence
 
@@ -88,11 +88,23 @@ AAPCS64: **x8 = number**, args in **x0…**, return in **x0**, `svc #0`.
 - **Host display backend:** on Windows, prefer QEMU `-display gtk` (Scoop SDL often hangs at host bring-up with no guest serial). GTK pixbuf/Adwaita warnings are cosmetic. Success = visible smoke paint + serial `ramfb smoke ok`. Override with `-DisplayBackend gtk|sdl|default`.
 - **QEMU flags:** documented in `scripts/run-qemu-gui.ps1` (gui) and `scripts/run-qemu.ps1` (headless).
 
+## Phase 5 notes (Sprint 6)
+
+Epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12) — Device bring-up & OTA skeleton.
+
+- **Board bring-up (SCRUM-30):** Tier C research target is Raspberry Pi 5. Checklist, port matrix, QEMU gaps, and next driver tasks live in [`docs/hardware-port-pi5.md`](hardware-port-pi5.md). Kernel `board_pi5` holds research constants, compile-time feature flags (all off), and prints an honest status line; it is **not** a working Pi 5 driver. Default runtime remains QEMU `virt`.
+- **OTA A/B (SCRUM-31):** Channels `os` / `agent` / `models` in `ota/channels.json` and `shared::ota`; A/B state in `ota/slots.json`; rollback in `ota/apply_update.md`. Host `aura-ota-verify` uses shared `verify_manifest` and rejects unsigned manifests (dev token `dev-signed` only). Kernel logs `ota: A/B not applied`. VirtIO-blk probe stub only. Aligns with [`docs/updates-4y.md`](updates-4y.md).
+- **Docs sync (SCRUM-32):** Development Plan + Confluence Architecture link epic SCRUM-12 and these Phase 5 notes.
+
+Deferred: real Pi UART/GIC drivers, on-device OTA apply, production signatures / verified boot, VirtIO-blk backed A/B slots.
+
 ## Next kernel milestones
 
 - VirtIO console IRQ → GIC (RX still polled)
-- VirtIO-blk for mutable/persistent storage (initrd remains boot path)
+- VirtIO-blk driver for mutable/persistent A/B storage (probe stub landed; initrd remains boot path)
 - ~~Real EL0 port of Agent Core tool loop~~ — Sprint 4 (mailbox opcodes; richer framing later)
 - ~~VirtIO-GPU / framebuffer foundations~~ — Sprint 5 (probe + ramfb smoke; full GPU later)
+- ~~Pi 5 bring-up checklist + honest stubs~~ — Sprint 6 research (UART/DT still open)
+- ~~OTA channels + host reject-unsigned~~ — Sprint 6 skeleton (on-device apply + real crypto deferred)
 - Guest process wait / init-owned spawn for stronger fail-closed
 - Richer guest shell input loop (typed prompts on VirtIO console RX)

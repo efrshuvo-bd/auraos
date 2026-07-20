@@ -6,8 +6,9 @@ members = [
     "userspace/init",
     "userspace/shell",
     "shared",
+    "tools/ota-verify",
 ]
-default-members = ["agent", "userspace/init", "userspace/shell", "shared"]
+default-members = ["agent", "userspace/init", "userspace/shell", "shared", "tools/ota-verify"]
 
 [workspace.package]
 version = "0.1.0"

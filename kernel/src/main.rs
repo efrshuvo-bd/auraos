@@ -19,6 +19,7 @@ mod frame;
 mod gic;
 mod ipc;
 mod mem;
+mod ota;
 mod process;
 mod sched;
 mod syscall;
@@ -37,6 +38,7 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
     uart::init();
     arch::enable_fp_simd();
     console::println("AuraOS kernel online");
+    console::println(board_pi5::status_line());
     console::println("phase1: uart + panic + frame allocator");
 
     bootinfo::init(fdt);
@@ -58,6 +60,8 @@ pub extern "C" fn kernel_main(fdt: usize) -> ! {
 
     exceptions::init();
     virtio::init();
+    virtio::probe_block_stub();
+    ota::init();
     display::init();
     timer::init();
     console::println("phase2: gic + timer IRQ armed");
