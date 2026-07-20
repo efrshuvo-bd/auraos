@@ -13,9 +13,10 @@ and a production-leaning verify path beyond the Sprint 6 stub.
 | `apply_update.md` | Operator notes (inactive slot → reboot → rollback) |
 | `dev-keys/` | Dev trust-anchor placeholders (**not** production secrets) |
 | `fixtures/` | Sample manifests (signed / unsigned / `sha256-dev`) |
-| `../shared/src/ota.rs` | Channel / slot / manifest types + `verify_manifest` |
+| `../shared/src/ota.rs` | Channel / slot / manifest types + host `verify_manifest` |
 | `../tools/ota-verify` | Host CLI wrapping shared verify (**reject unsigned**) |
-| `../kernel/src/ota.rs` | On-device refuse-unsigned + VirtIO-blk inactive-slot write |
+| `../kernel/src/ota_crypto.rs` | On-device `sha256-dev` verify (same digest algorithm) |
+| `../kernel/src/ota.rs` | Fail-closed verify → VirtIO-blk inactive-slot write |
 
 ## Channels
 
@@ -28,7 +29,7 @@ and a production-leaning verify path beyond the Sprint 6 stub.
 ## A/B + rollback (design)
 
 1. Download signed payload for a known channel.
-2. Verify with `aura-ota-verify` (or later on-device verifier) — **unsigned → reject**.
+2. Verify with `aura-ota-verify` **and/or** on-device `ota_crypto` — **unsigned / bad digest → reject**.
 3. Write into the **inactive** slot; mark `bootable=true`.
 4. Reboot; bootloader boots inactive slot.
 5. Success → `successful_boot=true`, flip `active`.
@@ -50,8 +51,11 @@ cargo run -p aura-ota-verify -- ota/fixtures/signed-sha256-dev-os.json # ok (dig
 Accepts legacy `dev-signed` **or** `sha256-dev:<hex>` (dev salt). HSM / ed25519 /
 verified boot remain roadmap — see `dev-keys/README.md` and `docs/updates-4y.md`.
 
-## On-device / storage (Sprint 8)
+## On-device verify + storage (Sprint 8 / SCRUM-41)
 
-- Kernel refuses unsigned, then writes inactive sector + flips active on VirtIO-blk.
-- Serial distinguishes stub-era vs real apply (`ota: A/B slot write ok`).
-- **Not** HSM / full verified boot yet — digests + boot-demo trust gate only.
+- Kernel runs the **same** `sha256-dev:` algorithm before any slot write:
+  refuses unsigned, rejects a bad digest, accepts the boot-demo fixture fields.
+- Serial: `ota: verify: sha256-dev ok (on-device; not HSM / not VB / not ed25519)`.
+- Then writes inactive sector + flips active on VirtIO-blk when present.
+- **Production still means:** HSM-backed ed25519 + verified boot chain — digests
+  with a tree-local salt are **dev/QEMU only**.

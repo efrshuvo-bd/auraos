@@ -20,6 +20,7 @@ mod gic;
 mod ipc;
 mod mem;
 mod ota;
+mod ota_crypto;
 mod process;
 mod sched;
 mod syscall;

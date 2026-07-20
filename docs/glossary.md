@@ -113,7 +113,7 @@ Related: [architecture.md](architecture.md) · [agent-core.md](agent-core.md) ·
 
 **VirtIO-blk** — VirtIO block (disk) device. In AuraOS: QEMU attaches `build/ab-slots.img`; kernel can read sector 0 (`AURAAB` header). Full mutable A/B apply write is still a later milestone.
 
-**VirtIO-GPU** — VirtIO graphics device (device id 16). In AuraOS: MMIO probe + **control queue** arming (Sprint 8); full scanout/resource flush still deferred — GUI smoke prefers ramfb.
+**VirtIO-GPU** — VirtIO graphics device (device id 16). In AuraOS: MMIO probe + control queue + 2D resource create / SET_SCANOUT / flush (Sprint 8); GUI default still prefers ramfb without `-VirtioGpu`.
 
 **ramfb** — QEMU "RAM framebuffer": guest memory painted as the host window. In AuraOS: configured via fw_cfg `etc/ramfb`, 480×800 XRGB8888 smoke fill with Home/Agent glyphs.
 
