@@ -60,6 +60,19 @@ function Test-OtaFixturesContract {
     }
 
     Write-Host "fixture contract ok: reject unsigned-{os,agent,models}, accept signed-* (dev-signed)"
+
+    # Soft ed25519 fixture (Sprint 9): signature must use ed25519: prefix + 128 hex chars.
+    $edPath = Join-Path $root "ota\fixtures\signed-ed25519-soft-os.json"
+    if (Test-Path $edPath) {
+        $ed = Get-Content -Raw -Path $edPath | ConvertFrom-Json
+        $sig = "$($ed.signature)"
+        if ($sig -notmatch '^ed25519:[0-9a-fA-F]{128}$') {
+            Write-Error "signed-ed25519-soft-os.json must use ed25519:<128 hex> (got: $sig)"
+            return $false
+        }
+        Write-Host "fixture contract ok: signed-ed25519-soft-os.json (ed25519 soft prefix)"
+    }
+
     return $true
 }
 

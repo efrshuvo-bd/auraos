@@ -3,6 +3,7 @@
 pub mod ipc;
 pub mod ota;
 pub mod tools;
+pub mod trust;
 
 pub const AURA_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AGENT_SERVICE: &str = "agent.core";

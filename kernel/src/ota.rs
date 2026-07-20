@@ -1,13 +1,15 @@
-//! On-device OTA A/B apply (Sprint 6–8 — SCRUM-31 / SCRUM-36 / SCRUM-40 / SCRUM-41).
+//! On-device OTA A/B apply (Sprint 6–9 — SCRUM-31 / SCRUM-36 / SCRUM-40 / SCRUM-41 / SCRUM-45).
 //!
 //! Sprint 8: real inactive-slot write via VirtIO-blk when the device is present,
 //! gated by an **on-device** `sha256-dev:` verify path (fail-closed). Host
 //! `aura-ota-verify` shares the same digest algorithm in `shared::ota`.
-//! Production HSM / ed25519 / full verified boot remain roadmap — see
-//! `docs/updates-4y.md`.
+//! Sprint 9: boot-adjacent VB stub (`vb::allow_activate`) must pass before apply.
+//! Production HSM / silicon verified boot remain roadmap — see
+//! `docs/updates-4y.md` and `docs/verified-boot.md`.
 
 use crate::console;
 use crate::ota_crypto::{self, ManifestView, VerifyError};
+use crate::vb;
 use crate::virtio;
 
 /// Channels from the 4-year update contract (`ota/channels.json`).
@@ -109,6 +111,11 @@ pub fn init() {
 
     if !virtio::block_ready() {
         console::println("ota: A/B not applied (no virtio-blk for slot write)");
+        return;
+    }
+
+    if !vb::allow_activate() {
+        console::println("ota: A/B not applied (VB stub refused activate)");
         return;
     }
 

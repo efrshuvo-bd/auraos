@@ -2,7 +2,8 @@
 
 Phase 5 / Sprint 6 bring-up target for AuraOS (Tier C research board → Tier A cloud agent).
 
-Jira: [SCRUM-30](https://auramislab.atlassian.net/browse/SCRUM-30) under epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12).  
+Jira: [SCRUM-30](https://auramislab.atlassian.net/browse/SCRUM-30) under epic [SCRUM-12](https://auramislab.atlassian.net/browse/SCRUM-12);
+Sprint 9 stretch [SCRUM-46](https://auramislab.atlassian.net/browse/SCRUM-46) under [SCRUM-43](https://auramislab.atlassian.net/browse/SCRUM-43).  
 In-tree board notes: `kernel/src/board_pi5.rs` (constants + feature flags only — **not** a working Pi 5 driver).  
 Linked from the [Development Plan](https://auramislab.atlassian.net/wiki/spaces/AuraOS/pages/295074) and [`docs/hardware.md`](hardware.md).
 
@@ -30,7 +31,7 @@ Use this as the living checklist. Items marked **done** are documentation / rese
 | Step | Status | Notes |
 |------|--------|-------|
 | Document debug UART pinout / connector | Partial | See `board_pi5::UART_*` hints — verify against current Pi 5 docs before wiring |
-| Map PL011 (or SoC UART) MMIO base from DT | Open | QEMU uses PL011 at `0x0900_0000`; Pi 5 base differs |
+| Map PL011 (or SoC UART) MMIO base from DT | Partial (Sprint 9) | QEMU uses PL011 at `0x0900_0000`. Pi 5 debug console is typically on the **RP1** UART (not the BCM2712 PL011 at the QEMU virt address) — next step is confirm DT node (`serial@…` under RP1) and baud before coding `uart::init` for silicon |
 | Bring up `uart::init` against board MMIO | Deferred | Do **not** claim QEMU PL011 driver works on Pi 5 |
 | Print `AuraOS kernel online` on real hardware | Deferred | Milestone gate |
 

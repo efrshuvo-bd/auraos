@@ -1,8 +1,8 @@
 //! EL0 process create / enter / leave.
 //!
 //! Slot policy: `Exited` entries stay in the table until a new `spawn` reuses the
-//! first free (`Exited` or never-used) slot. Address spaces of exited processes
-//! are not freed yet (bump frame allocator).
+//! first free (`Exited` or never-used) slot. On Exit, TTBR0 / user pages are
+//! returned to the frame freelist (SCRUM-47).
 
 use crate::console;
 use crate::elf;
@@ -277,7 +277,13 @@ extern "C" fn bridge_from_el0(action: u64) -> ! {
         unsafe {
             match action {
                 2 => {
+                    let ttbr0 = PROCS[idx].ttbr0;
                     PROCS[idx].state = State::Exited;
+                    PROCS[idx].ttbr0 = 0;
+                    if ttbr0 != 0 {
+                        vm::destroy_address_space(ttbr0);
+                        console::println("process: ttbr0 freed on exit");
+                    }
                 }
                 1 | 3 => {
                     PROCS[idx].state = State::Runnable;

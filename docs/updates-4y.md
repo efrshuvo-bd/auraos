@@ -40,12 +40,12 @@ See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing 
 | Channels `os` / `agent` / `models` | In `ota/channels.json` + `shared::ota::Channel` |
 | A/B slot metadata | `ota/slots.json` + `shared::ota::{SlotId, AbSlots}` |
 | Host reject-unsigned | `aura-ota-verify` (`shared::ota::verify_manifest`) |
-| Host trust paths | Legacy `dev-signed` **or** `sha256-dev:<hex>` digest (dev salt; not HSM) |
-| Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` + `signed-sha256-dev-os.json` |
+| Host trust paths | Legacy `dev-signed`, `sha256-dev:<hex>` digest (dev salt), or soft `ed25519:<hex>` (`shared::trust`; not HSM) |
+| Fixtures | `ota/fixtures/{signed,unsigned}-{os,agent,models}.json` + `signed-sha256-dev-os.json` + `signed-ed25519-soft-os.json` |
 | Rollback story | `ota/apply_update.md` |
-| Kernel on-device apply | Sprint 8: on-device `sha256-dev` verify (fail-closed), then VirtIO-blk inactive-slot write + active flip |
+| Kernel on-device apply | Sprint 8: on-device `sha256-dev` verify (fail-closed), then VirtIO-blk inactive-slot write + active flip; Sprint 9 VB stub gate |
 | VirtIO-blk for slots | QEMU read **and write** (`build/ab-slots.img`, `prepare-ab-disk.ps1`) |
-| Production crypto / verified boot | **Partial** — on-device digest path landed; **shipping** still needs HSM-backed ed25519 under VB |
+| Production crypto / verified boot | **Partial** — soft ed25519 host + VB stub landed; **shipping** still needs HSM-backed keys under real VB |
 
 ### QEMU A/B disk layout (SCRUM-35 / SCRUM-40)
 
@@ -58,12 +58,13 @@ See [`ota/`](../ota/) for channel manifests, A/B slot metadata, and dev signing 
 | Slot switch | Kernel writes inactive sector + flips active **only after** on-device verify succeeds |
 
 Host verify: `.\scripts\verify-ota.ps1` or `cargo test -p aura-ota-verify` —
-rejects unsigned; accepts `dev-signed` and `sha256-dev:` fixtures.
+rejects unsigned; accepts `dev-signed`, `sha256-dev:`, and soft `ed25519:` fixtures.
 
-### On-device verify (SCRUM-41) + verified-boot roadmap (honest)
+### On-device verify (SCRUM-41) + soft ed25519 / VB (Sprint 9)
 
 1. Fail-closed reject of unsigned **and** bad digests before any inactive-slot write (done; serial proof).
 2. Host + on-device `sha256-dev:` digest path (same salt/canonical form in `shared::ota` and `kernel/src/ota_crypto.rs`) (done).
-3. **What "production" still means:** rotated **ed25519** trust anchors, **HSM-backed** keys, and a verified boot chain (bootloader → kernel → system). Digests with a tree-local salt are **dev/QEMU only** — not production naming.
-4. **Next crypto:** ed25519 verify when CI/WDAC allows pure-Rust crates without blocked build scripts.
-5. **Shipping:** HSM + VB before trusting OTA on silicon.
+3. Host soft `ed25519:` via `shared::trust::SoftEd25519` + `ed25519-compact` (no build script); `HsmDeferred` backend shape present but fails closed (SCRUM-44).
+4. Boot-adjacent VB stub (`kernel/src/vb.rs`, `docs/verified-boot.md`) demonstrates refuse-then-ok before apply (SCRUM-45).
+5. **What "production" still means:** rotated **ed25519** trust anchors in an **HSM**, and a real verified boot chain on silicon. Soft software keys are **dev/QEMU only**.
+6. **Shipping:** HSM + silicon VB before trusting OTA on device.
