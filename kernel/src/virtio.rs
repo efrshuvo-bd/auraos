@@ -6,8 +6,8 @@
 //! Console RX: polled drain remains available; Sprint 7 also registers the
 //! VirtIO-MMIO SPI with GICv2 and drains the RX used ring from the IRQ path.
 //!
-//! Block: minimal modern virtio-blk read of sector 0 for A/B slot experimentation
-//! (`scripts/prepare-ab-disk.ps1` + `run-qemu*.ps1`).
+//! Block: minimal modern virtio-blk read/write for A/B slot experimentation
+//! (`scripts/prepare-ab-disk.ps1` + `run-qemu*.ps1`). Sprint 8 adds OUT path.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering, fence};
 
@@ -25,6 +25,7 @@ const VIRTIO_ID_BLOCK: u32 = 2;
 const VIRTIO_MMIO_IRQ_BASE: u32 = 48;
 
 const VIRTIO_BLK_T_IN: u32 = 0;
+const VIRTIO_BLK_T_OUT: u32 = 1;
 const VIRTQ_DESC_F_NEXT: u16 = 1;
 const BLK_SECTOR_SIZE: usize = 512;
 
@@ -730,20 +731,38 @@ fn setup_block(base: usize, version: u32) -> Result<(), ()> {
     Ok(())
 }
 
-fn read_block_sector(sector: u64, out: &mut [u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
+/// Public sector size for A/B OTA helpers.
+pub const BLOCK_SECTOR_SIZE: usize = BLK_SECTOR_SIZE;
+
+/// Read one 512-byte sector from VirtIO-blk (when ready).
+pub fn read_block_sector(sector: u64, out: &mut [u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
     let dev = unsafe {
         match BLK.as_mut() {
             Some(d) => d,
             None => return Err(()),
         }
     };
-    unsafe { blk_read_one(dev, sector, out) }
+    unsafe { blk_xfer(dev, sector, out, true) }
 }
 
-unsafe fn blk_read_one(
+/// Write one 512-byte sector to VirtIO-blk (Sprint 8 / SCRUM-40).
+pub fn write_block_sector(sector: u64, data: &[u8; BLK_SECTOR_SIZE]) -> Result<(), ()> {
+    let mut buf = *data;
+    let dev = unsafe {
+        match BLK.as_mut() {
+            Some(d) => d,
+            None => return Err(()),
+        }
+    };
+    unsafe { blk_xfer(dev, sector, &mut buf, false) }
+}
+
+/// `is_read == true` → IN (device fills `buf`); `false` → OUT (device reads `buf`).
+unsafe fn blk_xfer(
     dev: &mut BlkDev,
     sector: u64,
-    out: &mut [u8; BLK_SECTOR_SIZE],
+    buf: &mut [u8; BLK_SECTOR_SIZE],
+    is_read: bool,
 ) -> Result<(), ()> {
     // Layout in req_page: BlkReq (16) | data (512) | status (1)
     let req_off = 0usize;
@@ -754,12 +773,24 @@ unsafe fn blk_read_one(
     }
 
     let req = BlkReq {
-        type_: VIRTIO_BLK_T_IN,
+        type_: if is_read {
+            VIRTIO_BLK_T_IN
+        } else {
+            VIRTIO_BLK_T_OUT
+        },
         reserved: 0,
         sector,
     };
     core::ptr::write_volatile((dev.req_page + req_off) as *mut BlkReq, req);
-    core::ptr::write_bytes((dev.req_page + data_off) as *mut u8, 0, BLK_SECTOR_SIZE);
+    if is_read {
+        core::ptr::write_bytes((dev.req_page + data_off) as *mut u8, 0, BLK_SECTOR_SIZE);
+    } else {
+        core::ptr::copy_nonoverlapping(
+            buf.as_ptr(),
+            (dev.req_page + data_off) as *mut u8,
+            BLK_SECTOR_SIZE,
+        );
+    }
     core::ptr::write_volatile((dev.req_page + status_off) as *mut u8, 0xff);
 
     let desc = dev.q.desc as *mut VirtqDesc;
@@ -768,10 +799,14 @@ unsafe fn blk_read_one(
     (*desc.add(0)).len = core::mem::size_of::<BlkReq>() as u32;
     (*desc.add(0)).flags = VIRTQ_DESC_F_NEXT;
     (*desc.add(0)).next = 1;
-    // desc 1: data (device-writable)
+    // desc 1: data — WRITE for reads (device fills), device-readable for writes
     (*desc.add(1)).addr = (dev.req_page + data_off) as u64;
     (*desc.add(1)).len = BLK_SECTOR_SIZE as u32;
-    (*desc.add(1)).flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    (*desc.add(1)).flags = if is_read {
+        VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE
+    } else {
+        VIRTQ_DESC_F_NEXT
+    };
     (*desc.add(1)).next = 2;
     // desc 2: status (device-writable)
     (*desc.add(2)).addr = (dev.req_page + status_off) as u64;
@@ -810,10 +845,65 @@ unsafe fn blk_read_one(
     if status != 0 {
         return Err(());
     }
-    core::ptr::copy_nonoverlapping(
-        (dev.req_page + data_off) as *const u8,
-        out.as_mut_ptr(),
-        BLK_SECTOR_SIZE,
-    );
+    if is_read {
+        core::ptr::copy_nonoverlapping(
+            (dev.req_page + data_off) as *const u8,
+            buf.as_mut_ptr(),
+            BLK_SECTOR_SIZE,
+        );
+    }
     Ok(())
 }
+
+/// Set up VirtIO-GPU control queue (SCRUM-42). Scanout/resource flush deferred;
+/// ramfb remains the visible fallback.
+pub fn init_gpu_control_queue() -> Result<(), ()> {
+    let Some((base, version, _slot)) = find_device_slot(VIRTIO_ID_GPU) else {
+        return Err(());
+    };
+    unsafe {
+        w32(base, REG_STATUS, 0);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE);
+        w32(base, REG_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER);
+
+        w32(base, REG_DEVICE_FEATURES_SEL, 0);
+        let _h0 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DEVICE_FEATURES_SEL, 1);
+        let _h1 = r32(base, REG_DEVICE_FEATURES);
+        w32(base, REG_DRIVER_FEATURES_SEL, 0);
+        w32(base, REG_DRIVER_FEATURES, 0);
+        w32(base, REG_DRIVER_FEATURES_SEL, 1);
+        w32(base, REG_DRIVER_FEATURES, 0);
+
+        if version >= 2 {
+            w32(
+                base,
+                REG_STATUS,
+                STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
+            );
+            let st = r32(base, REG_STATUS);
+            if (st & STATUS_FEATURES_OK) == 0 {
+                return Err(());
+            }
+        }
+        if version == 1 {
+            w32(base, REG_GUEST_PAGE_SIZE, frame::PAGE_SIZE as u32);
+        }
+
+        // Control queue is queue 0 for virtio-gpu.
+        let q = alloc_queue(version)?;
+        setup_queue(base, version, 0, &q)?;
+
+        let mut st = STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_DRIVER_OK;
+        if version >= 2 {
+            st |= STATUS_FEATURES_OK;
+        }
+        w32(base, REG_STATUS, st);
+        // Keep queue pages live for the rest of boot (leak intentionally —
+        // no GPU command submission yet; proves queue programming beyond probe).
+        core::mem::forget(q);
+    }
+    Ok(())
+}
+
+const VIRTIO_ID_GPU: u32 = 16;

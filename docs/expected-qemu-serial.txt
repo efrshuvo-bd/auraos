@@ -12,8 +12,8 @@
 # GTK pixbuf/Adwaita warnings are cosmetic host packaging noise.
 # Override: `-DisplayBackend sdl|gtk|default`.
 # Pass `-VirtioGpu` to also add `-device virtio-gpu-device,bus=virtio-mmio-bus.1`
-# for SCRUM-29 probe logging; until GPU queues/scanout exist the window may then
-# show QEMU's placeholder instead of ramfb.
+# for SCRUM-42 control-queue logging; scanout still deferred — ramfb remains the
+# visible surface by default.
 # Default GUI boots expect `display: no virtio-gpu device` then
 # `display: ramfb mapped… (fw_cfg DMA)` / `display: ramfb smoke ok…`; headless skips ramfb.
 #
@@ -41,32 +41,37 @@ virtio: RX poll ok (empty)
 virtio: blk at mmio version=2 (modern)
 virtio: blk read sector0 ok
 virtio: A/B header magic ok active=A
-ota: channels=os,agent,models (A/B metadata in ota/; apply stubbed)
-ota: apply stub: active=A inactive=B - would switch A<->B
-ota: apply stub: refused unsigned (host aura-ota-verify remains authority)
-ota: A/B not applied (no crypto / no slot write)
+ota: channels=os,agent,models (A/B metadata in ota/; apply path Sprint 8)
+ota: verify: refused unsigned (fail-closed before slot write)
+ota: verify: boot-demo trust ok (dev key; not HSM / not VB)
+ota: apply real: wrote inactive=B flipped active=B (virtio-blk)
+ota: A/B slot write ok (unsigned still refused above)
 display: no virtio-gpu device
 display: ramfb skip - no etc/ramfb (use run-qemu-gui.ps1)
 gic: v2 ready (CNTP PPI 30)
 timer: CNTP armed (100 Hz, IRQ preempt)
 virtio: console IRQ registered GIC 48 (drain RX on IRQ; poll still ok)
 phase2: gic + timer IRQ armed
-syscall: table ready (write/read/yield/exit/ipc/waitpid)
+syscall: table ready (write/read/yield/exit/ipc/waitpid/spawn)
 phase2: scheduler + syscalls + ipc ready
-userspace: loading guests from initrd
-userspace: init/agent/shell ready (EL0)
+userspace: loading init from initrd (init-owned spawn)
+userspace: init ready (EL0); agent/shell via SYS_SPAWN
 phase2/3: userspace init scheduled
 AuraOS entering scheduler
 sched: run init
 init: AuraOS PID 1 online
-init: starting Agent Core (required)
-init: waitpid path ready (kernel still spawns guests; init-owned spawn deferred)
+init: owning spawn of Agent Core + shell
+init: waitpid richer (status+pid; wait-any -1; blocking helper)
+userspace: init spawned agent.core pid=2
+init: spawned agent.core
 sched: run agent.core
 agent.core: privileged service online
 agent.core: tools ready (help/system_status/list_services/echo)
 agent.core: EL0 tool loop running
 init: Agent Core ready
 init: starting shell
+userspace: init spawned shell pid=3
+init: spawned shell (init-owned lifecycle)
 syscall: exit
 sched: run shell
 shell: home + agent overlay ready
@@ -109,7 +114,11 @@ sched: idle
 # display: ramfb smoke ok (solid fill + glyphs)
 # Window: teal 480×800 with AURAOS / HOME / AGENT glyphs (not QEMU placeholder).
 #
-# --- With -VirtioGpu (probe only; window may show QEMU placeholder until scanout) ---
-# display: virtio-gpu at mmio 0x… version=2 (modern) (probe only; queues deferred)
+# --- With -VirtioGpu (control queue armed; scanout still deferred; ramfb fallback) ---
+# display: virtio-gpu at mmio 0x… version=2 (modern)
+# display: virtio-gpu control queue ready (scanout deferred; ramfb fallback)
 # display: ramfb mapped 480x800 @ 0x… (fw_cfg DMA)
 # display: ramfb smoke ok (solid fill + glyphs)
+#
+# Note: A/B active letter flips each successful apply boot; regenerate with
+# `.\scripts\prepare-ab-disk.ps1` for a clean active=A transcript.

@@ -113,7 +113,7 @@ Related: [architecture.md](architecture.md) · [agent-core.md](agent-core.md) ·
 
 **VirtIO-blk** — VirtIO block (disk) device. In AuraOS: QEMU attaches `build/ab-slots.img`; kernel can read sector 0 (`AURAAB` header). Full mutable A/B apply write is still a later milestone.
 
-**VirtIO-GPU** — VirtIO graphics device (device id 16). In AuraOS: **probe** exists; full command queues and scanout are deferred (Sprint 8 theme). GUI smoke today prefers ramfb.
+**VirtIO-GPU** — VirtIO graphics device (device id 16). In AuraOS: MMIO probe + **control queue** arming (Sprint 8); full scanout/resource flush still deferred — GUI smoke prefers ramfb.
 
 **ramfb** — QEMU "RAM framebuffer": guest memory painted as the host window. In AuraOS: configured via fw_cfg `etc/ramfb`, 480×800 XRGB8888 smoke fill with Home/Agent glyphs.
 
@@ -145,15 +145,15 @@ Related: [architecture.md](architecture.md) · [agent-core.md](agent-core.md) ·
 
 **ELF / ELF64** — Executable and Linkable Format. In AuraOS: kernel loads 64-bit guest ELFs from the initrd into process slots.
 
-**init / PID 1** — First userspace process; traditionally responsible for starting the rest of the system. In AuraOS: `guest-init` is required to bring up Agent Core (fail-closed); full init-owned spawn of agent/shell is still maturing (thin `waitpid` exists).
+**init / PID 1** — First userspace process; traditionally responsible for starting the rest of the system. In AuraOS: `guest-init` owns spawn of Agent Core and shell via `SYS_SPAWN` (kernel boots init only).
 
 **PID** — Process identifier. In AuraOS: process table tracks PID plus Runnable / Running / Blocked / Exited.
 
-**Syscall** — Request from userspace into the kernel (via SVC). In AuraOS: `write`, `read`, `yield`, `exit`, `ipc_*`, and thin non-blocking `waitpid` (`SYS_WAITPID`).
+**Syscall** — Request from userspace into the kernel (via SVC). In AuraOS: `write`, `read`, `yield`, `exit`, `ipc_*`, richer `waitpid` (`SYS_WAITPID`), and init-only `SYS_SPAWN`.
 
-**waitpid** — Wait for a child process to change state (classic Unix). In AuraOS: guest `waitpid_noblock` / thin syscall; richer init-owned lifecycle is planned.
+**waitpid** — Wait for a child process to change state (classic Unix). In AuraOS: packed `(pid, status)` return, wait-any (`0` / `-1`), blocking helper; used by init for fail-closed lifecycle.
 
-**spawn** — Create/start a new process. In AuraOS: kernel still loads init/agent/shell from initrd at boot; init-owned spawn of agent/shell remains a follow-on goal.
+**spawn** — Create/start a new process. In AuraOS: init loads agent/shell from initrd through `SYS_SPAWN`; kernel no longer hard-starts all three as the sole path.
 
 **Scheduler (`sched`)** — Code that chooses which process runs. In AuraOS: `sched::run` loops until idle; acceptance often includes serial reaching `sched: idle`.
 

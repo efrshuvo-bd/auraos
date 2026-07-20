@@ -1,0 +1,7 @@
+{
+  "channel": "os",
+  "version": "0.1.1",
+  "target_slot": "B",
+  "payload_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "signature": "sha256-dev:fea8b7c20660696b1bdfeb0f23e4c7caa7d5cec5d40d1b5b70dfd28e83094b27"
+}
