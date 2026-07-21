@@ -2,6 +2,8 @@
 
 A mentor-style study guide for someone who knows little about Rust or OS development, mapped to what AuraOS actually built from Foundation through Sprint 11.
 
+**Interactive track (planned course):** prefer **[learning-course.md](learning-course.md)** if you want a **week-by-week curriculum** with free Watch/Read links, Do exercises (rustlings/QEMU), AuraOS labs, self-check quizzes, and a progress checklist (~24 weeks, Blocks 0–6 + capstone). This learning-path doc remains the **sprint-mapped reference** (what each stage built + glossary labs). Confluence: [AuraOS Learning Course — Interactive free curriculum](https://auramislab.atlassian.net/wiki/spaces/AuraOS/pages/557199).
+
 **Goal:** build the skills to read, explain, and eventually rebuild AuraOS features for Sprints 1–11 **without leaning on AI as a crutch**. AI can quiz you; your primary textbook is this repo’s code plus the glossary.
 
 **Honesty up front:** this is **months of deliberate study**, not a weekend crash course. A motivated beginner studying part-time might need **3–9+ months** before the later sprints feel comfortable. That is normal. OS work rewards patience more than speed.
